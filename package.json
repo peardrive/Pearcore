@@ -1,0 +1,49 @@
+{
+  "name": "prototype-core",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon --watch src --exec src/index.ts",
+    "test": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.0",
+    "@types/ws": "^8.18.1",
+    "@types/yargs": "^17.0.34",
+    "@typescript-eslint/eslint-plugin": "^8.46.3",
+    "@typescript-eslint/parser": "^8.46.3",
+    "eslint": "^9.39.0",
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.10",
+    "pear-interface": "^1.1.0",
+    "ts-jest": "^29.4.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  },
+  "dependencies": {
+    "bip39": "^3.1.0",
+    "corestore": "^7.5.0",
+    "fs-extra": "^11.3.2",
+    "hypercore-protocol": "^8.0.7",
+    "hyperdht": "^6.27.0",
+    "hyperdrive": "^13.0.2",
+    "hyperswarm": "^4.14.2",
+    "libsodium-wrappers-sumo": "^0.7.15",
+    "localdrive": "^2.2.0",
+    "mirror-drive": "^1.6.0",
+    "pear": "^1.2.1",
+    "random-access-memory": "^6.2.1",
+    "treeify": "^1.1.0",
+    "tweetnacl": "^1.0.3",
+    "winston": "^3.18.3",
+    "ws": "^8.18.3",
+    "yargs": "^18.0.0"
+  },
+  "type": "module"
+}
