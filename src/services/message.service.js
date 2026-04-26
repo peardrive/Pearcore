@@ -1,8 +1,8 @@
 import * as EVENTS from '../constants/events.constants.js';
 import { getSpaceTopicHash } from "../utils/space.utils.js"
-import { createSpaceMessage } from '../utils/protocol.utils.js';
+import { createSpaceMessage, encryptPayload } from '../utils/protocol.utils.js';
 import { publicKeyIsAllowedToRead } from '../utils/policy.utils.js';
-import { now } from '../utils/general.utils.js';
+import { encryptJSON, hex, randomNonce } from '../utils/crypto.utils.js';
 
 export class MessageService {
     constructor({ managers }) {
@@ -104,11 +104,17 @@ export class MessageService {
 
         const { publicKey, secretKey } = this.managers.session.getCredentials();
 
+        const nonce = hex(randomNonce());
+        if (spaceRecord.secret) {
+            payload = await encryptPayload({ payload, spaceSecret: spaceRecord.secret, nonce: nonce });
+        }
+
         const message = await createSpaceMessage({
             topic: topic,
             messagePayload: payload,
             publicKey: publicKey,
-            secretKey: secretKey
+            secretKey: secretKey,
+            nonce: nonce
         });
 
         // limit the nodes to a subset that has the required permission to receive this message
