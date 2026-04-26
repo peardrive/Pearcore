@@ -2,3 +2,9 @@ node_modules
 test-storage
 local-storage
 test-accounts
+dev.db
+drizzle
+.vscode
+.env
+.DS_Store
+package-lock.json

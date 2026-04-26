@@ -1,0 +1,189 @@
+import { EventEmitter } from "node:events";
+import { createChild } from "../logger.js";
+import { hex, hexToUint8 } from "../utils/crypto.utils.js";
+import { connectSwarm, joinSwarmTopic } from "../utils/network.utils.js";
+import { createProfileUpdateMessage, createSpaceHashListMessage } from "../utils/protocol.utils.js";
+import { parseBootstrapAddress } from "../utils/parsers.utils.js";
+
+const logger = createChild('ConnectionManager');
+
+export class ConnectionManager {
+    constructor(managers) {
+        this.socketManager = managers.socketManager;
+        this.messageManager = managers.messageManager;
+        this.sessionManager = managers.sessionManager;
+        this.storageManager = managers.storageManager;
+
+        this.swarmInstance = null;
+        this.discoveryMap = {};
+
+        this.emitter = new EventEmitter();
+    }
+
+    EVENTS = {
+        CONNECTION: 'connection',
+        DISCONNECT: 'disconnect',
+        HANDSHAKE: 'handshake'
+    }
+
+    get connectionConfig() {
+        return this.sessionManager.getConnectionConfig();
+    }
+
+    on(event, callback) {
+        this.emitter.on(event, callback);
+    }
+
+    /**
+     * Loads and initiate discovery for topics during the boot up.
+     */
+    async init() {
+        const { publicKey, secretKey } = this.sessionManager.getCredentials();
+        const boostrapper = this.sessionManager.getBootstrapperEndpoint();
+
+        this.swarmInstance = connectSwarm({
+            keyPair: {
+                publicKey: hexToUint8(publicKey),
+                secretKey: hexToUint8(secretKey)
+            },
+            bootstrap: boostrapper ? parseBootstrapAddress(boostrapper) : {}
+        });
+
+        this.swarmInstance.on('connection', async (socket, info) => {
+            const publicKey = hex(info.publicKey);
+            const topics = info.topics.map(t => hex(t));
+
+            socket.on('data', async buffer => {
+                await this.messageManager.handleIncomingMessage(socket, buffer.toString(), info);
+            });
+
+            socket.on('close', () => {
+                this.socketManager.removeSocket(socket);
+                this.emitter.emit(this.EVENTS.DISCONNECT, { publicKey });
+            });
+            socket.on('error', (err) => {
+                logger.warn(`Socket connection error from peer ${publicKey}`, { error: err });
+                this.socketManager.removeSocket(socket);
+                this.emitter.emit(this.EVENTS.DISCONNECT, { publicKey });
+            })
+
+            this.socketManager.addSocket(socket, publicKey, topics);
+
+            this.emitter.emit(this.EVENTS.CONNECTION, { publicKey, topics });
+
+            if (this.connectionConfig.enableHandshake) {
+                const context = await this.handshake(socket, info);
+                this.emitter.emit(this.EVENTS.HANDSHAKE, { publicKey, context });
+            }
+        });
+
+        const topicHashList = await this.storageManager.getTopicHashList();
+
+        for (const topic of topicHashList) {
+            await this.join(topic);
+        }
+    }
+
+    /**
+     * Checks if space has been broadcasted for node discovery
+     * @param {String} spaceTopicHash - The space topic hash
+     * @returns {Boolean} Returns True if the space has been broadcasted.
+     */
+    isDiscoverable(spaceTopicHash) {
+        return this.discoveryMap.hasOwnProperty(spaceTopicHash);
+    }
+
+    /**
+     * Initiate network discovery for new space topic hash.
+     * @param {String} spaceTopicHash - 64 character hex topic (hash)
+     * @returns {Promise<void>} Resolves when the new topic has been broadcasted for discovery.
+     */
+    async join(spaceTopicHash) {
+        if (this.isDiscoverable(spaceTopicHash)) return;
+
+        const discoveryOptions = { server: true, client: true };
+        const discovery = await joinSwarmTopic(this.swarmInstance, spaceTopicHash, discoveryOptions);
+        this.discoveryMap[spaceTopicHash] = discovery;
+    }
+
+    /**
+     * Quit Network discovery for specific space. The node will maintain the already stablished socket connections.
+     * @param {String} spaceTopicHash - The space topic hash
+     */
+    async leave(spaceTopicHash) {
+        if (this.isDiscoverable(spaceTopicHash)) {
+            const discovery = this.discoveryMap[spaceTopicHash];
+            await discovery.destroy();
+
+            delete this.discoveryMap[spaceTopicHash];
+        }
+    }
+
+    /**
+     * Updates connected nodes with the lastes topics.
+     * @returns {Promise<void>} Resolves when new SpaceHashList message with the recent topic list has been sent
+     * to all connected nodes.
+     */
+    async update() {
+        const topics = Object.keys(this.discoveryMap);
+        const { publicKey, secretKey } = this.sessionManager.getCredentials();
+
+        const message = await createSpaceHashListMessage({
+            hashList: topics,
+            publicKey: publicKey,
+            secretKey: secretKey
+        });
+
+        const sockets = this.socketManager.getConnectedSockets();
+        await this.messageManager.broadcastMessageToSockets(message, sockets);
+    }
+
+    /**
+     * Handles the initial handshake to enable basic functionality between two connected nodes.
+     * @param {Object} socket - The Socket connection.
+     * @param {Object} info - Hyperswarm's info object
+     * @returns {Promise<{ topics: Array, profile: object }>} Resolves when the messages has been sent to the other node.
+     */
+    async handshake(socket, info) {
+        try {
+            const { publicKey, secretKey } = this.sessionManager.getCredentials();
+            const topics = await this.storageManager.getTopicHashList();
+
+            const spaceHashListMessage = await createSpaceHashListMessage({
+                hashList: topics,
+                publicKey: publicKey,
+                secretKey: secretKey
+            });
+
+            await this.messageManager.sendMessageToSocket(spaceHashListMessage, socket);
+
+            const profile = await this.storageManager.getProfileByPublicKey(publicKey);
+            if (profile) {
+                const profileUpdateMessage = await createProfileUpdateMessage({
+                    profile: profile,
+                    topics: topics,
+                    publicKey: publicKey,
+                    secretKey: secretKey
+                });
+
+                await this.messageManager.sendMessageToSocket(profileUpdateMessage, socket);
+            }
+
+            return { topics, profile };
+        }
+        catch (error) {
+            console.error(error)
+        }
+    }
+
+    /**
+     * Destroys the hyperswarm and all socket connections,
+     * calling this method after account logout or service shutdown
+     * will notify all peers that this node is now out of reach.
+     */
+    async destroy() {
+        await this.swarmInstance.destroy();
+        this.swarmInstance = null;
+        this.discoveryMap = {};
+    }
+}

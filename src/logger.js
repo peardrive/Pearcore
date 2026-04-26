@@ -1,67 +1,105 @@
-import fs from "fs"
-import path from "path"
-import os from "os"
-import { fileURLToPath } from "url"
-import { DEFAULT_DRIVE_DIR } from "./constants.js"
+import pino from 'pino';
+import { join } from 'path';
+import { mkdirSync } from 'fs';
+import { DEFAULT_ACCOUNT_DIR, PEARCORE_LOG_LEVEL } from './constants/global.js';
+import { registerGracefulShutdown } from "./utils/system.utils.js"
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const LOG_DIR = join(DEFAULT_ACCOUNT_DIR, '.logs');
+mkdirSync(LOG_DIR, { recursive: true });
 
-// Directory for logs (next to hyperdrive data)
-const LOG_DIR = path.join(DEFAULT_DRIVE_DIR, ".logs")
-const LOG_FILE = path.join(LOG_DIR, `${new Date().toISOString().split("T")[0]}.log`)
+const LOG_FILE = join(
+  LOG_DIR,
+  `${new Date().toISOString().slice(0, 10)}.log`
+);
 
-// Ensure directory exists
-if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true })
+const isProd = process.env.NODE_ENV === 'production';
+const isTest = process.env.NODE_ENV === 'test'
+
+/**
+ * Pino transport configuration
+ * - Pretty console logs in development
+ * - JSON file logs always
+ */
+const transport = isTest
+  ? undefined
+  : pino.transport({
+      targets: [
+        ...(isProd
+          ? []
+          : [
+              {
+                target: 'pino-pretty',
+                level: PEARCORE_LOG_LEVEL,
+                options: {
+                  colorize: true,
+                  translateTime: 'SYS:standard',
+                  ignore: 'pid,hostname',
+                },
+              },
+            ]),
+        {
+          target: 'pino/file',
+          level: PEARCORE_LOG_LEVEL,
+          options: {
+            destination: LOG_FILE,
+            mkdir: true,
+          },
+        },
+      ],
+    })
+
+function wrap(logger) {
+  const levels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+
+  for (const level of levels) {
+    const original = logger[level].bind(logger);
+
+    logger[level] = (arg1, arg2, ...rest) => {
+      // Case: logger.warn("message", { data })
+      if (typeof arg1 === 'string' && arg2 && typeof arg2 === 'object') {
+        return original(arg2, arg1, ...rest);
+      }
+
+      return original(arg1, arg2, ...rest);
+    };
+  }
+
+  return logger;
 }
 
-// Basic colored output for terminal
-const colors = {
-  reset: "\x1b[0m",
-  gray: "\x1b[90m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  red: "\x1b[31m",
-  cyan: "\x1b[36m",
+export const logger = wrap(
+  pino(
+    {
+      level: PEARCORE_LOG_LEVEL,
+      enabled: !isTest,
+      base: { pid: process.pid },
+      serializers: {
+        err: pino.stdSerializers.err,
+      },
+      redact: {
+        paths: [
+          'password',
+          'token',
+          'authorization',
+          'req.headers.authorization',
+        ],
+        censor: '[REDACTED]',
+      },
+    },
+    transport
+  )
+)
+
+/**
+ * Child logger helper
+ * Uses structured fields (not string prefixes)
+ */
+export function createChild(bindings) {
+  return logger.child(bindings);
 }
 
 /**
- * Write a line to both console and file.
- * @param {"info"|"warn"|"error"|"debug"} level
- * @param {string} msg
+ * Optional exports for consumers
  */
-function log(level, msg) {
-  const timestamp = new Date().toISOString()
-  const formatted = `[${timestamp}] [${level.toUpperCase()}] ${msg}\n`
-  fs.appendFileSync(LOG_FILE, formatted)
-
-  let color
-  switch (level) {
-    case "info":
-      color = colors.green
-      break
-    case "warn":
-      color = colors.yellow
-      break
-    case "error":
-      color = colors.red
-      break
-    case "debug":
-      color = colors.cyan
-      break
-    default:
-      color = colors.reset
-  }
-
-  process.stdout.write(`${color}${formatted}${colors.reset}`)
-}
-
-export const logger = {
-  info: (msg) => log("info", msg),
-  warn: (msg) => log("warn", msg),
-  error: (msg) => log("error", msg),
-  debug: (msg) => log("debug", msg),
-  path: LOG_FILE,
-  dir: LOG_DIR,
-}
+export const logDir = LOG_DIR;
+export const logFile = LOG_FILE;

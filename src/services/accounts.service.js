@@ -1,76 +1,165 @@
-import path from 'path'
-import fs from 'fs/promises'
-import { 
-  listAccountsWithMeta, 
-  createAccount as utilCreateAccount, 
-  readAccountMeta 
-} from '../utils/accounts.utils.js'
-import { deriveKeyFromPassword, decryptJSON, hexToUint8 } from '../utils/crypto.utils.js'
-import { ACCOUNTS_ROOT } from '../constants.js'
-import b4a from 'b4a'
+import { loadAccountDatabase } from '../database/database.js';
+import {
+  listAccountsWithMeta,
+  createAccount,
+  authenticateAccount,
+  deleteAccount,
+} from '../utils/accounts.utils.js';
 
-/**
- * List all accounts under the specified root path.
- * @param {string} [root=ACCOUNTS_ROOT] - Optional base path for accounts
- * @returns {Promise<Array>} - Array of accounts with metadata
- */
-export async function listAccounts(root = ACCOUNTS_ROOT) {
-  return listAccountsWithMeta(root)
-}
 
-/**
- * Create a new account at the specified root path.
- * @param {string} username 
- * @param {string} password 
- * @param {string} [root=ACCOUNTS_ROOT] - Optional base path for account storage
- * @returns {Promise<Object>} - Newly created account info
- */
-export async function createAccount(username, password, root = ACCOUNTS_ROOT) {
-  return utilCreateAccount(username, password, root)
-}
+export class AccountService {
+  constructor({ managers, root }) {
+    this.managers = managers;
+    this.root = root;
+  }
 
-/**
- * Resolve the account directory path for a username under the specified root.
- * @param {string} username 
- * @param {string} [root=ACCOUNTS_ROOT]
- * @returns {string} - Full path to account folder
- */
-async function accountDir(username, root = ACCOUNTS_ROOT) {
-  return path.join(root, username.trim().toLowerCase())
-}
+  static STATES = {
+    AUTHENTICATED: 'authenticated',
+    LOGIN_REQUIRED: 'login required'
+  }
 
-/**
- * Get metadata for a specific account.
- * @param {string} username 
- * @param {string} [root=ACCOUNTS_ROOT]
- * @returns {Promise<Object>} - Metadata of the account including path
- */
-export async function getAccountMeta(username, root = ACCOUNTS_ROOT) {
-  const dir = await accountDir(username, root)
-  const meta = await readAccountMeta(dir)
-  if (!meta) throw new Error('Invalid account')
-  return { ...meta, path: dir }
-}
+  /**
+   * Lists all accounts under the given root directory.
+   * @returns {Promise<Array>} Array of accounts with metadata
+   */
+  async list() {
+    return await listAccountsWithMeta(this.root);
+  }
 
-/**
- * Authenticate user credentials.
- * @param {string} username 
- * @param {string} password 
- * @param {string} [root=ACCOUNTS_ROOT]
- * @returns {Promise<Object>} - Object containing username, publicKey, secretKey, and path
- */
-export async function authenticate(username, password, root = ACCOUNTS_ROOT) {
-  const dir = await accountDir(username, root)
-  const credPath = path.join(dir, 'credentials.enc.json')
-  const raw = await fs.readFile(credPath, 'utf8')
-  const enc = JSON.parse(raw)
-  const salt = b4a.from(enc.salt, 'base64')
-  const key = await deriveKeyFromPassword(password, salt)
-  const creds = await decryptJSON(key, enc) // throws on bad password
-  return {
-    username: creds.username,
-    publicKey: hexToUint8(creds.publicKey),
-    secretKey: hexToUint8(creds.secretKey),
-    path: dir
+  /**
+   * Creates a new account with the given username and password.
+   * Additionally initializes the user's Spacebook database.
+   * @param {string} username - Username for the new account
+   * @param {string} password - Password for the new account
+   * @returns {Promise<Object>} Account metadata
+   */
+  async create(username, password) {
+    const shouldbeDefined = obj => obj !== undefined && obj !== null;
+    const shouldBeString = (obj) => typeof obj === 'string';
+    const shouldBeValid = (obj) => shouldbeDefined(obj) &&
+      shouldBeString(obj) && obj.length > 0;
+
+    if (!shouldBeValid(username)) {
+      throw new Error('Invalid username parameter');
+    }
+
+    if (!shouldBeValid(password)) {
+      throw new Error('Invalid password parameter');
+    }
+
+    const account = await createAccount(username, password, this.root);
+    const { sqlite } = await loadAccountDatabase(username, this.root);
+
+    // close connection afte creation
+    await sqlite.close();
+
+    return account;
+  }
+
+  async delete(username) {
+    const shouldbeDefined = obj => obj !== undefined && obj !== null;
+    const shouldBeString = (obj) => typeof obj === 'string';
+    const shouldBeValid = (obj) => shouldbeDefined(obj) &&
+      shouldBeString(obj) && obj.length > 0;
+
+    if (!shouldBeValid(username)) {
+      throw new Error('Invalid username parameter');
+    }
+
+    await deleteAccount(username, this.root);
+  }
+
+  /**
+   * Authenticates a user with username and password.
+   * Loads the Spacebook database and initiates the user's discovery node.
+   * @param {string} username - Username to authenticate
+   * @param {string} password - Password to authenticate
+   * @returns {Promise<Object>} Object containing username, publicKey, and secretKey
+   */
+  async authenticate(username, password) {
+    const shouldbeDefined = obj => obj !== undefined && obj !== null;
+    const shouldBeString = (obj) => typeof obj === 'string';
+    const shouldBeValid = (obj) => shouldbeDefined(obj) &&
+      shouldBeString(obj) && obj.length > 0;
+
+    if (!shouldBeValid(username)) {
+      throw new Error('Invalid username parameter');
+    }
+
+    if (!shouldBeValid(password)) {
+      throw new Error('Invalid password parameter');
+    }
+
+    const creds = await authenticateAccount(username, password, this.root);
+    const { sqlite, db } = await loadAccountDatabase(username, this.root);
+
+    this.managers.session.setCredentials({
+      publicKey: creds.publicKey,
+      secretKey: creds.secretKey
+    });
+
+    this.managers.session.setAccount({ username: creds.username });
+    this.managers.session.setDatabase({ db, sqlite });
+
+    // loads the p2p discovery for the account
+    await this.managers.connection.init();
+    // setup message throttler memory
+    await this.managers.throttle.load();
+
+    return {
+      username: creds.username,
+      publicKey: creds.publicKey,
+      secretKey: creds.secretKey
+    };
+  }
+
+  /**
+   * Logs out the current user and clears the session.
+   * @returns {Promise<void>} True if logout succeeds
+   */
+  async logout() {
+    await this.managers.connection.destroy();
+
+    const { sqlite } = this.managers.session.getDatabase();
+    sqlite.close();
+
+    this.managers.session.reset();
+    this.managers.throttle.clear();
+  }
+
+  /**
+   * Indicates whether the user is logged in and credentials are valid.
+   * @returns {Object} State object with username, publicKey and authentication state.
+   */
+  getCurrentState() {
+    const shouldBeDefined = obj => obj !== undefined && obj !== null;
+
+    const { db, sqlite } = this.managers.session.getDatabase();
+    const { publicKey, secretKey } = this.managers.session.getCredentials();
+    const { username } = this.managers.session.getAcccount();
+
+    if (
+      shouldBeDefined(db) && shouldBeDefined(sqlite) &&
+      shouldBeDefined(publicKey) && shouldBeDefined(secretKey)
+    ) {
+      return {
+        publicKey: publicKey,
+        username: username,
+        state: AccountService.STATES.AUTHENTICATED
+      };
+    }
+
+    else {
+      return {
+        state: AccountService.STATES.LOGIN_REQUIRED
+      };
+    }
+  }
+
+  loginRequired() {
+    const current = this.getCurrentState();
+    if (current.state === AccountService.STATES.LOGIN_REQUIRED) {
+      throw new Error('Login is required.');
+    }
   }
 }

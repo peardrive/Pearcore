@@ -1,92 +1,87 @@
-import { logger } from "../logger"
+import { logger } from "../logger.js"
 
 /**
  * Registers WebSocket RPC handlers for account management.
- * All account operations accept an optional `root` path to override ACCOUNTS_ROOT.
- * 
- * @param {object} router - RPC router instance
- * @param {object} services - { accounts, session, swarm }
+ * The handler only processes JSON and calls service methods.
+ * @param {object} router - RPC router
+ * @param {object} core - { accounts, session, swarm }
  */
-export function registerAccountHandlers(router, services) {
-  // Return the current state of the account (who is logged in)
-  router.register('accounts.state', async () => {
+export function registerAccountHandlers(router, core) {
+
+  /**
+   * Returns the current state of the accounts service.
+   * Logs and returns an error object if fetching the state fails.
+   */
+  router.register('accounts.state', async ({id = undefined} = {}) => {
     try {
-      const creds = services.session.getCredentials()
-      if (!creds) {
-        return { state: 'login required' }
-      }
-      return {
-        state: 'authenticated',
-        username: creds.username,
-        publicKey: Buffer.from(creds.publicKey).toString('hex')
-      }
+      const response = core.accounts.getCurrentState();
+      return { id, ok: true, ...response };
     } catch (err) {
-      logger.error('Error getting account state:', err)
-      return { state: 'error', message: err.message }
+      logger.error('Error getting account state:', err);
+      return { id, ok: false, error: err.message };
+    }
+  });
+
+  /**
+   * Lists all accounts in the specified root directory (or default drive directory).
+   * Returns an object with `ok: true` and the accounts array on success.
+   * Logs and returns an error object with `ok: false` if listing fails.
+   */
+  router.register('accounts.list', async ({ id = undefined } = {}) => {
+    try {
+      const accounts = await core.accounts.list();
+      return { id, ok: true, accounts };
+    } catch (err) {
+      logger.error('Error listing accounts:', err);
+      return { id, ok: false, error: err.message };
+    }
+  });
+
+  /**
+   * Creates a new account with the given username and password in the specified root directory (or default drive directory).
+   * Returns an object with `ok: true` and the created account on success.
+   * Validates that username and password are provided.
+   * Logs and returns an error object with `ok: false` if creation fails.
+   */
+  router.register('accounts.create', async ({ id = undefined, username, password } = {}) => {
+    try {
+      const account = await core.accounts.create(username, password);
+      return { id, ok: true, account };
+    } catch (err) {
+      logger.error('Failed creating account', err);
+      return { id, ok: false, error: err.message };
     }
   })
 
-  // List all accounts under optional root
-  router.register('accounts.list', async ({ root } = {}) => {
+  /**
+   * Authenticates a user with the given username and password in the specified root directory (or default drive directory).
+   * Returns `ok: true` and the user's public key (hex string) on successful authentication.
+   * Logs a warning and returns `ok: false` with a generic error message if authentication fails.
+   */
+  router.register('auth.login', async ({ id = undefined, username, password } = {}) => {
+    if (!username?.trim() || !password?.trim()) return { id, ok: false, error: 'username and password required' }
     try {
-      const accounts = await services.accounts.listAccounts(root)
-      return { ok: true, accounts }
-    } catch (err) {
-      logger.error('Error listing accounts:', err)
-      return { ok: false, error: err.message }
-    }
-  })
-
-  // Create a new account under optional root
-  router.register('accounts.create', async ({ username, password, root } = {}) => {
-    try {
-      const account = await services.accounts.createAccount(username, password, root)
-      return { ok: true, account }
-    } catch (err) {
-      logger.error('Error creating account:', err)
-      return { ok: false, error: err.message }
-    }
-  })
-
-  // Login
-  router.register('auth.login', async ({ username, password, root } = {}) => {
-    try {
-      const creds = await services.accounts.authenticate(username, password, root)
-
-      // Store credentials in session
-      services.session.setCredentials({
-        username: creds.username,
-        publicKey: creds.publicKey,
-        secretKey: creds.secretKey,
-      })
-
-      // Start swarm after login
-      try {
-        const { swarm } = await services.swarm.startSwarmNode({
-          keyPair: { publicKey: creds.publicKey, secretKey: creds.secretKey },
-          session: services.session
-        })
-        services.session.attachSwarm(swarm)
-      } catch (err) {
-        logger.error('Failed to start swarm:', err)
-        return { ok: false, error: 'Login succeeded, but swarm failed to start' }
-      }
-
-      return { ok: true, publicKey: Buffer.from(creds.publicKey).toString('hex') }
+      const creds = await core.accounts.authenticate(username, password)
+      return { id, ok: true, publicKey: creds.publicKey }
     } catch (err) {
       logger.warn(`Login failed for user: ${username} | error: ${err.message}`)
-      return { ok: false, error: 'Invalid username or password' }
+      return { id, ok: false, error: err.message }
     }
   })
 
-  // Logout
-  router.register('auth.logout', async () => {
+  /**
+   * RPC handler for 'auth.logout'.
+   * Logs out the current user using the accounts service.
+   * Returns `ok: true` on success.
+   * Logs and returns `ok: false` with an error message if logout fails.
+   */
+  router.register('auth.logout', async ({ id = undefined } = {}) => {
     try {
-      await services.session.clear() // destroys swarm if exists and clears credentials
-      return { ok: true }
+      await core.accounts.logout()
+      return { id, ok: true }
     } catch (err) {
-      logger.error('Error during logout:', err)
-      return { ok: false, error: err.message }
+      logger.error('Logout failed:', err)
+      return { id, ok: false, error: err.message }
     }
   })
 }

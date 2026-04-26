@@ -1,0 +1,1 @@
+ALTER TABLE `sharelinks` ADD `timestamp` integer NOT NULL;

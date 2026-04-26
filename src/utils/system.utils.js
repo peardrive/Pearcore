@@ -1,6 +1,42 @@
+import path from "path";
 import fs from 'fs/promises'
-import { logger } from "../logger.js"
 
+export const pathJoin = (...paths) => path.join(...paths)
+
+/**
+ * Check if a file or directory exists
+ * @param {string} path - The path to check
+ * @returns {boolean} - True if exists, false if not
+ */
+export async function fileExists(path) {
+    try {
+        await fs.access(path);
+        return true;
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            return false;
+        }
+        throw error;
+    }
+}
+
+/**
+ * Read a file with specified encoding
+ * @param {string} filePath - Path to the file
+ * @param {string} encoding - Encoding (default: 'utf8')
+ * @returns {Promise<string|Buffer>} File content
+ */
+export async function readFile(filePath, encoding = 'utf8') {
+    try {
+        const content = await fs.readFile(filePath, encoding);
+        return content;
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            throw new Error(`File not found: ${filePath}`);
+        }
+        throw new Error(`Failed to read file ${filePath}: ${error.message}`);
+    }
+}
 
 /**
  * Ensure a directory exists, creating it recursively if needed.
@@ -31,16 +67,16 @@ export async function listSubdirs(rootPath) {
 /**
  * Registers a graceful shutdown handler for SIGINT and SIGTERM.
  *
- * @param {string} name - Name for logging (e.g. "SWARM", "DHT")
+ * @param {string} name - Name for logging (e.g. "network.utils", "DHT")
  * @param {() => Promise<void>} onShutdown - Async function to call on shutdown
  */
 export function registerGracefulShutdown(name, onShutdown) {
   const shutdown = async () => {
-    logger.warn(`[${name}] Shutting down...`)
+    console.warn(`[${name}] Shutting down...`)
     try {
       await onShutdown()
     } catch (err) {
-      logger.error(`[${name}] Error during shutdown:`, err?.message || err)
+      console.error(`[${name}] Error during shutdown:`, err?.message || err)
     } finally {
       process.exit(0)
     }
