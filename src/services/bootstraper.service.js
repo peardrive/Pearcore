@@ -1,5 +1,5 @@
 import { startBootstrapper } from "../utils/network.utils.js"
-import { BOOTSTRAP_PORT} from '../constants/global.js'
+import { BOOTSTRAP_PORT} from '../constants/global.constants.js'
 
 /**
  * Starts a HyperDHT bootstrap node and a Hyperswarm node

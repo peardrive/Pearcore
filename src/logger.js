@@ -1,7 +1,7 @@
 import pino from 'pino';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
-import { DEFAULT_ACCOUNT_DIR, PEARCORE_LOG_LEVEL } from './constants/global.js';
+import { DEFAULT_ACCOUNT_DIR, PEARCORE_LOG_LEVEL } from './constants/global.constants.js';
 import { registerGracefulShutdown } from "./utils/system.utils.js"
 
 const LOG_DIR = join(DEFAULT_ACCOUNT_DIR, '.logs');

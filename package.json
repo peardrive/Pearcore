@@ -11,12 +11,15 @@
     "db:migrate": "drizzle-kit migrate  --config=drizzle.config.js",
     "db:push": "drizzle-kit push"
   },
-  "keywords": ["p2p", "decentralized", "file-sharing", "messaging"],
+  "keywords": [
+    "p2p",
+    "decentralized",
+    "file-sharing",
+    "messaging"
+  ],
   "author": "PearDrive Team",
   "license": "MIT",
-  "repository": {
-
-  },
+  "repository": {},
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^24.10.0",
@@ -46,6 +49,7 @@
     "blessed-contrib": "^4.11.0",
     "bs58": "^6.0.0",
     "chalk": "^5.6.2",
+    "chokidar": "^5.0.0",
     "cli-progress": "^3.12.0",
     "cli-table3": "^0.6.5",
     "corestore": "^7.5.0",
@@ -53,6 +57,7 @@
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.44.7",
     "hyperbee": "^2.27.3",
+    "hypercore": "^11.28.1",
     "hypercore-protocol": "^8.0.7",
     "hyperdht": "^6.28.0",
     "hyperswarm": "^4.16.0",

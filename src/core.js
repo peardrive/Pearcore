@@ -3,7 +3,7 @@ import { SpaceService } from './services/space.service.js';
 import { ProfileService } from './services/profile.service.js';
 import { MessageService } from './services/message.service.js';
 
-import { DEFAULT_ACCOUNT_DIR } from './constants/global.js';
+import { DEFAULT_ACCOUNT_DIR } from './constants/global.constants.js';
 import { initializeManagers } from './managers/initialization.js';
 
 /**

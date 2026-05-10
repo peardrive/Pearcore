@@ -5,7 +5,8 @@ export class SessionManager {
     constructor(defaultSession) {
         this.STATIC_SESSION = defaultSession || {
             account: {
-                username: undefined
+                username: undefined,
+                directory: undefined, // account's file directory
             },
 
             // these parameter will be updated after successful account login (accountService.authenticate())
@@ -89,8 +90,9 @@ export class SessionManager {
         return this.session.get('account');
     }
 
-    setAccount({ username }) {
-        this.session.set('account.username', username);
+    setAccount(params) {
+        const setting = this.session.get('account');
+        this.session.set('account', { ...setting, ...params });
     }
 
     getConnectionConfig() {
