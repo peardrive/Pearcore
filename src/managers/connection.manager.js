@@ -13,6 +13,7 @@ export class ConnectionManager {
         this.messageManager = managers.messageManager;
         this.sessionManager = managers.sessionManager;
         this.storageManager = managers.storageManager;
+        this.muxManager = managers.muxManager;
 
         this.swarmInstance = null;
         this.discoveryMap = {};
@@ -54,16 +55,19 @@ export class ConnectionManager {
             const topics = info.topics.map(t => hex(t));
 
             socket.on('data', async buffer => {
-                await this.messageManager.handleIncomingMessage(socket, buffer.toString(), info);
+                await this.muxManager.route(socket, buffer, info);
+                //await this.messageManager.handleIncomingMessage(socket, buffer.toString(), info);
             });
 
             socket.on('close', () => {
                 this.socketManager.removeSocket(socket);
+                this.muxManager.cleanup(info);
                 this.emitter.emit(this.EVENTS.DISCONNECT, { publicKey });
             });
             socket.on('error', (err) => {
                 logger.warn(`Socket connection error from peer ${publicKey}`, { error: err });
                 this.socketManager.removeSocket(socket);
+                this.muxManager.cleanup(info);
                 this.emitter.emit(this.EVENTS.DISCONNECT, { publicKey });
             })
 

@@ -3,7 +3,7 @@ import * as EVENTS from '../../src/constants/events.constants.js';
 import * as MESSAGES from '../../src/constants/messages.constants.js';
 import { initializeManagers } from "../../src/managers/initialization.js";
 import { createSpaceHashListMessage, createSpaceMessage, createSpaceSyncMessage, encryptPayload } from "../../src/utils/protocol.utils.js";
-import { buildTestSpacePayload, createFakeP2PConnection } from "../general.utils.js";
+import { buildTestSpacePayload, createFakeP2PConnection, unframeJson } from "../general.utils.js";
 import { generateSpaceTopic, getSpaceTopicHash } from "../../src/utils/space.utils.js";
 import { SpaceSyncHandler } from "../../src/protocol/space.protocol.js";
 import { now } from "../../src/utils/general.utils.js";
@@ -138,7 +138,7 @@ describe('Space Protocols', () => {
             const callStack = primary.socket.write.mock.calls
             expect(callStack.length).toBe(1);
 
-            const response = JSON.parse(callStack[0]);
+            const response = JSON.parse(unframeJson(callStack[0][0]));
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);
             expect(response.payload.linkedMessageNonce).toEqual(message.nonce);
@@ -150,7 +150,7 @@ describe('Space Protocols', () => {
             const callStack = primary.socket.write.mock.calls
             expect(callStack.length).toBe(1);
 
-            const response = JSON.parse(callStack[0]);
+            const response = JSON.parse(unframeJson(callStack[0][0]));
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);
             expect(response.payload.linkedMessageNonce).toEqual(message.nonce);
@@ -195,7 +195,7 @@ describe('Space Protocols', () => {
             const standbyCallStack = standby.socket.write.mock.calls;
             expect(standbyCallStack.length).toBe(1);
 
-            const standbyReceivedMessage = JSON.parse(standbyCallStack[0]);
+            const standbyReceivedMessage = JSON.parse(unframeJson(standbyCallStack[0][0]));
             expect(standbyReceivedMessage).toEqual(message);
 
             // outlier should not receive message
@@ -281,7 +281,7 @@ describe('Space Protocols', () => {
             const standbyCallStack = standby.socket.write.mock.calls;
             expect(standbyCallStack.length).toBe(1);
 
-            const standbyReceivedMessage = JSON.parse(standbyCallStack[0]);
+            const standbyReceivedMessage = JSON.parse(unframeJson(standbyCallStack[0][0]));
             expect(standbyReceivedMessage).toEqual(message);
 
             // outlier should not receive message
@@ -325,7 +325,7 @@ describe('Space Protocols', () => {
             expect(actionContext).toBe(SpaceSyncHandler.STATES.PEER_REQUIRE_UPDATE);
 
             // this response is an attemp update sender's space record with the new data
-            const secondaryReceivedMessage = JSON.parse(secondary.socket.write.mock.calls[0]);
+            const secondaryReceivedMessage = JSON.parse(unframeJson(secondary.socket.write.mock.calls[0][0]));
             expect(secondaryReceivedMessage.type).toEqual(EVENTS.SpaceSync);
             expect(secondaryReceivedMessage.topic).toEqual(message.topic);
             expect(secondaryReceivedMessage.payload).toEqual(primaryUpdatedSpace);
@@ -341,7 +341,7 @@ describe('Space Protocols', () => {
             const standbyCallStack = standby.socket.write.mock.calls;
             expect(standbyCallStack.length).toBe(1);
 
-            const standbyReceivedMessage = JSON.parse(standbyCallStack[0]);
+            const standbyReceivedMessage = JSON.parse(unframeJson(standbyCallStack[0][0]));
             expect(standbyReceivedMessage).toEqual(secondaryReceivedMessage);
 
             // outlier should not receive message
@@ -381,10 +381,10 @@ describe('Space Protocols', () => {
 
             expect(secondary.socket.write.mock.calls.length).toBe(0);
 
-            const standbyCallStack = standby.socket.write.mock.calls[0];
+            const standbyCallStack = standby.socket.write.mock.calls;
             expect(standbyCallStack.length).toBe(1);
 
-            const standbyReceivedMessage = JSON.parse(standbyCallStack[0]);
+            const standbyReceivedMessage = JSON.parse(unframeJson(standbyCallStack[0][0]));
             expect(standbyReceivedMessage).toEqual(message);
 
             const outlierCallStack = outlier.socket.write.mock.calls;

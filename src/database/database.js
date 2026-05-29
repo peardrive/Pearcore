@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { accountDotDir } from '../utils/accounts.utils.js';
-import { DRIZZLE_MIGRATIONS_PATH } from "../constants/database.js";
+import { DRIZZLE_MIGRATIONS_PATH } from "../constants/database.constants.js";
 
 /**
  * Ensure the migrations folder exists.

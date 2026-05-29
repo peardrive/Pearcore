@@ -3,13 +3,15 @@ import path from 'path';
 import fs from 'fs/promises';
 import chokidar from 'chokidar';
 import { createReadStream } from 'fs';
-import { EventEmitter } from 'node:events';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { now } from './general.utils.js';
 import { fileIndex, fileRegistry } from '../database/schemas/file.schema.js';
-import { hex, hash } from './crypto.utils.js';
+import { hex } from './crypto.utils.js';
+import { getFileSize } from './system.utils.js';
+import { generateMerkleTree } from './merkleTree.utils.js';
+import { getSpace } from './space.utils.js';
 
-const DEFAULT_CHUNK_SIZE = 1 * 1024 * 1024; // 4 MB
+export const DEFAULT_CHUNK_SIZE = 256 * 1024; // 256KB
 
 /**
  * Recursively list all files under a root directory
@@ -30,6 +32,13 @@ export async function listFiles(root) {
         });
 }
 
+//mapping chokidar library events
+export const WatchTypes = {
+    ADD: 'add',
+    CHANGE: 'change',
+    DELETE: 'unlink'
+};
+
 /**
  * Wathes multiple files for change using chokidar.
  * @param {string[]} paths - Array of file paths
@@ -37,7 +46,6 @@ export async function listFiles(root) {
 export function createWatcher(paths) {
     // convert all paths to absolute
     paths.map(p => path.resolve(p));
-
 
     const watcher = chokidar.watch(paths, {
         persistent: true,
@@ -122,6 +130,80 @@ export async function getfileRegistryRecord(db, registeryId) {
 }
 
 /**
+ * Create query filters for file registry records based on the given criteria.
+ * @param {Object} filters - Filter criteria object.
+ * @param {number} filters.id - Unique registry ID (primary key).
+ * @param {string} filters.fileSourcePath - Original file path on the device.
+ * @param {number} filters.timestamp - Unix timestamp when the registry was created.
+ * @param {number} filters.spaceId - Foreign key referencing the space.
+ * @param {string} filters.spacePath - Artificial directory path within the space.
+ * @param {string} filters.spaceFilename - Artificial filename within the space.
+ * @param {string} filters.rootHash - Root hash of the Merkle tree (optional).
+ * @param {number} filters.leafCount - Total number of leaf nodes in the Merkle tree.
+ * @param {number} filters.height - Height of the Merkle tree.
+ * @returns {Array} An array of Drizzle equality conditions (`eq`) to be used in a `where()` clause.
+ */
+function createFileRegistryQueryFilters(filters) {
+    const conditions = [];
+
+    if (filters.id !== undefined) {
+        conditions.push(eq(fileRegistry.id, filters.id));
+    }
+    if (filters.fileSourcePath !== undefined) {
+        conditions.push(eq(fileRegistry.fileSourcePath, filters.fileSourcePath));
+    }
+    if (filters.timestamp !== undefined) {
+        conditions.push(eq(fileRegistry.timestamp, filters.timestamp));
+    }
+    if (filters.spaceId !== undefined) {
+        conditions.push(eq(fileRegistry.spaceId, filters.spaceId));
+    }
+    if (filters.spacePath !== undefined) {
+        conditions.push(eq(fileRegistry.spacePath, filters.spacePath));
+    }
+    if (filters.spaceFilename !== undefined) {
+        conditions.push(eq(fileRegistry.spaceFilename, filters.spaceFilename));
+    }
+    if (filters.rootHash !== undefined) {
+        conditions.push(eq(fileRegistry.rootHash, filters.rootHash));
+    }
+    if (filters.leafCount !== undefined) {
+        conditions.push(eq(fileRegistry.leafCount, filters.leafCount));
+    }
+    if (filters.height !== undefined) {
+        conditions.push(eq(fileRegistry.height, filters.height));
+    }
+
+    return conditions;
+}
+
+/**
+ * Query file registry records using filters.
+ * @param {Objectc} db - Database instance.
+ * @param {Object} filters - Filter criteria object.
+ * @param {number} filters.id - Unique registry ID (primary key).
+ * @param {string} filters.fileSourcePath - Original file path on the device.
+ * @param {number} filters.timestamp - Unix timestamp when the registry was created.
+ * @param {number} filters.spaceId - Foreign key referencing the space.
+ * @param {string} filters.spacePath - Artificial directory path within the space.
+ * @param {string} filters.spaceFilename - Artificial filename within the space.
+ * @param {string} filters.rootHash - Root hash of the Merkle tree (optional).
+ * @param {number} filters.leafCount - Total number of leaf nodes in the Merkle tree.
+ * @param {number} filters.height - Height of the Merkle tree.
+ * @returns 
+ */
+export async function queryFileRegistryRecords(db, filters) {
+    const conditions = createFileRegistryQueryFilters(filters);
+    const query = db.select().from(fileRegistry);
+    
+    if (conditions.length > 0) {
+        return await query.where(and(...conditions));
+    }
+
+    return await query;
+}
+
+/**
  * Update a single file registry record by ID.
  * @param {object} db - Database instance.
  * @param {number} registeryId - ID of the file registry.
@@ -136,11 +218,36 @@ export async function getfileRegistryRecord(db, registeryId) {
  * @param {number} params.height - Depth value of the merkle tree.
  * @returns {Promise<void>} - Resolves when the record updated in the database.
  */
-export async function updatefileRegistryRecord(db, registeryId, params) {
+export async function updateFileRegistryRecord(db, registeryId, params) {
     const payload = buildfileRegistryPayload(params);
     return await db.update(fileRegistry)
         .set(payload)
         .where(eq(fileRegistry.id, registeryId));
+}
+
+
+/**
+ * List all file registry records.
+ * @param {Object} db - Database instance.
+ * @returns {Promise<Array>} Resolves when list of all records has been fetched.
+ */
+export async function listFileRegisteryRecords(db) {
+    return await db.select().from(fileRegistry).all();
+}
+
+/**
+ * Get referenced space object from registry record.
+ * @param {Object} db - Database instace.
+ * @param {Object} record - The file registry record.
+ * @returns {Promise<Object>} - Resolves with associated space object.
+ */
+export async function getSpaceFromRegistryRecord(db, record) {
+    if (!record && !record.spaceId) {
+        throw new Error('file registry record does not include spaceId paramater');
+    }
+
+    const space = await getSpace(db, record.spaceId);
+    return space;
 }
 
 
@@ -174,10 +281,86 @@ export async function createFileIndexRecord(db, params) {
     const result = await db.insert(fileIndex).values(payload).returning({
         registryId: fileIndex.registryId,
         hash: fileIndex.hash,
-        rootHash: fileIndex.rootHash 
+        rootHash: fileIndex.rootHash
     });
 
     return result[0];
+}
+
+/**
+ * Create query filters for file index records based on the given criteria.
+ * @param {Object} filters - Filter criteria object.
+ * @param {number} filters.registryId - File registry ID foreign key.
+ * @param {string} filters.rootHash - Root hash string of the Merkle tree.
+ * @param {string} filters.hash - Node's hash value.
+ * @param {number} filters.level - Current node's level in the Merkle tree (0 = root).
+ * @param {string} filters.parentHash - Parent node's hash value relative to the current node.
+ * @param {string} filters.leftChildHash - The first child node of the current node.
+ * @param {string} filters.rightChildHash - The second child node of the current node.
+ * @param {number} filters.leafIndex - Leaf index (only relevant for leaf nodes).
+ * @returns {Array} An arrayn of Drizzle conditions.
+ */
+function createFileIndexQueryFilters(filters) {
+    const conditions = [];
+
+    if (filters.registryId !== undefined) {
+        conditions.push(eq(fileIndex.registryId, filters.registryId));
+    }
+
+    if (filters.rootHash !== undefined) {
+        conditions.push(eq(fileIndex.rootHash, filters.rootHash));
+    }
+
+    if (filters.hash !== undefined) {
+        conditions.push(eq(fileIndex.hash, filters.hash));
+    }
+
+    if (filters.level !== undefined) {
+        conditions.push(eq(fileIndex.level, filters.level));
+    }
+
+    if (filters.parentHash !== undefined) {
+        conditions.push(eq(fileIndex.parentHash, filters.parentHash));
+    }
+
+    if (filters.leftChildHash !== undefined) {
+        conditions.push(eq(fileIndex.leftChildHash, filters.leftChildHash));
+    }
+
+    if (filters.rightChildHash !== undefined) {
+        conditions.push(eq(fileIndex.rightChildHash, filters.rightChildHash));
+    }
+
+    if (filters.leafIndex !== undefined) {
+        conditions.push(eq(fileIndex.leafIndex, filters.leafIndex));
+    }
+
+    return conditions;
+}
+
+/**
+ * Query file index records using filters.
+ * @param {Object} db - Database instance.
+ * @param {Object} filters - Filter criteria object.
+ * @param {number} filters.registryId - File registry ID foreign key.
+ * @param {string} filters.rootHash - Root hash string of the Merkle tree.
+ * @param {string} filters.hash - Node's hash value.
+ * @param {number} filters.level - Current node's level in the Merkle tree (0 = root).
+ * @param {string} filters.parentHash - Parent node's hash value relative to the current node.
+ * @param {string} filters.leftChildHash - The first child node of the current node.
+ * @param {string} filters.rightChildHash - The second child node of the current node.
+ * @param {number} filters.leafIndex - Leaf index (only relevant for leaf nodes).
+ * @returns {Promise<Array<Object>>} Resolves when query has been fetched from database.
+ */
+export async function queryFileIndexRecord(db, filters) {
+    const conditions = createFileIndexQueryFilters(filters);
+    const query = db.select().from(fileIndex);
+
+    if (conditions.length > 0) {
+        return await query.where(and(...conditions));
+    }
+
+    return await query;
 }
 
 export function createFileStream(filePath, chunksize = DEFAULT_CHUNK_SIZE) {
@@ -185,103 +368,16 @@ export function createFileStream(filePath, chunksize = DEFAULT_CHUNK_SIZE) {
 }
 
 /**
- * 
- * @param {string} filePath 
- * @param {EventEmitter} emitter 
- * @returns 
+ * Create file registry record and merkle tree indexing
+ * @param {Object} params 
+ * @param {Object} params.db - Database instace.
+ * @param {string} params.fileSourcePath - Local file path.
+ * @param {string} params.spacePath - Virtual directory path for space.
+ * @param {string} params.spaceFilename - Virtual file name for space.
+ * @param {number} params.spaceId - ID of space for reference.
+ * @param {EventEmitter} params.emitter - Optional emitter to track indexing progress.
+ * @returns {Promise<{fileRegistry: Object, fileIndexRecords: Array}>} Resolves when the file indexing has been complete.
  */
-export async function generateMerkleTree(filePath, emitter = null) {
-    const stream = createFileStream(filePath);
-    // get the file size
-    const stats = await fs.stat(filePath)
-    const fileSize = stats.size;
-    // calculate the height and leaf count from file size
-    const leafCount = fileSize === 0 ? 1 : Math.ceil(
-        fileSize / DEFAULT_CHUNK_SIZE
-    )
-    const height = Math.ceil(Math.log2(leafCount));
-
-    const computeTotalSteps = leafCount => {
-        let total = leafCount;
-        let count = leafCount;
-        while (count > 1) {
-            count = Math.ceil(count / 2);
-            total += count;
-        }
-        return total;
-    }
-
-    const totalSteps = computeTotalSteps(leafCount);
-
-    // optionally emit progress events when emitter is provided
-    let stepCount = 0;
-    const emitProgress = () => {
-        stepCount++;
-
-        if (emitter) {
-            emitter.emit(filePath, {
-                currentStep: stepCount,
-                totalSteps: totalSteps
-            });
-        }
-    }
-
-    const leafHashes = [];
-
-    for await (const chunk of stream) {
-        leafHashes.push(hash(chunk));
-        emitProgress();
-    }
-
-    if (leafHashes.length === 0) {
-        leafHashes.push(hash(Buffer.alloc(0)));
-        emitProgress();
-    }
-
-    const levels = [];
-    levels[height] = leafHashes.map((hash, index) => ({
-        hash: hash,
-        leafIndex: index
-    }));
-
-    for (let currentHeight = height; currentHeight >= 1; currentHeight--) {
-        const currentLevel = levels[currentHeight];
-        const parentLevel = [];
-
-        for (let index = 0; index < currentLevel.length; index = index + 2) {
-            const isLastNode = index + 1 >= currentLevel.length;
-
-            const left = currentLevel[index].hash;
-            const right = !isLastNode ? currentLevel[index + 1].hash : null;
-
-            const combined = !isLastNode ? Buffer.concat([left, right]) : Buffer.from(left);
-            const parentHash = hash(combined);
-
-            parentLevel.push({
-                hash: parentHash,
-                leftChild: left,
-                rightChild: isLastNode ? null : right,
-                leafIndex: null,
-            });
-
-            levels[currentHeight][index].parentHash = parentHash;
-            if (!isLastNode) {
-                levels[currentHeight][index + 1].parentHash = parentHash;
-            }
-
-            emitProgress();
-        }
-
-        levels[currentHeight - 1] = parentLevel;
-    }
-
-    return {
-        levels,
-        height,
-        leafCount
-    };
-}
-
 export async function generateFileRecord(params) {
     const {
         db,
@@ -293,7 +389,14 @@ export async function generateFileRecord(params) {
     } = params;
 
     const source = path.resolve(fileSourcePath);
-    const tree = await generateMerkleTree(source, emitter);
+    const stream = createFileStream(source);
+    const size = await getFileSize(source);
+    const tree = await generateMerkleTree({
+        stream: stream,
+        size: size,
+        emitter: emitter,
+        chunkSize: DEFAULT_CHUNK_SIZE,
+    });
     const rootHash = hex(tree.levels[0][0].hash);
 
     const { registryId } = await createfileRegistryRecord(db, {
@@ -328,5 +431,18 @@ export async function generateFileRecord(params) {
         }
     }
 
-    return { registryId, fileIndexRecords };
+    return { registryId, fileIndexRecords, rootHash };
+}
+
+/**
+ * Deletes file registry with all related indexing records from database.
+ * @param {Object} db - Database instace.
+ * @param {number} registryId - ID of the file registry record.
+ * @returns {Promise<void>}
+ */
+export async function deleteFileRecord(db, registryId) {
+    // delete file registry record
+    await db.delete(fileRegistry).where(eq(fileRegistry.id, registryId));
+    // delete all file indexing records
+    await db.delete(fileIndex).where(eq(fileIndex.registryId, registryId));
 }

@@ -2,8 +2,10 @@ import path from 'path';
 import { EventEmitter } from 'stream';
 import { describe, it, afterEach, beforeEach, expect } from "vitest";
 import { createSpace } from '../../src/utils/space.utils.js';
-import { generateFileRecord, generateMerkleTree, getfileRegistryRecord, listFiles } from '../../src/utils/files.utils.js';
+import { generateMerkleTree } from '../../src/utils/merkleTree.utils.js';
+import { generateFileRecord, getfileRegistryRecord, listFiles, DEFAULT_CHUNK_SIZE, createFileStream } from '../../src/utils/files.utils.js';
 import { cleanup, makeTempDir, generateRandomFile, createTempDatabase, buildTestSpacePayload, createNestedFiles } from '../general.utils.js';
+import { getFileSize } from '../../src/utils/system.utils.js';
 
 describe('File Utils', () => {
     let root = null;
@@ -42,7 +44,16 @@ describe('File Utils', () => {
             const progressEvents = [];
             emitter.on(filePath, context => { progressEvents.push(context) });
 
-            const { levels, height, leafCount } = await generateMerkleTree(filePath, emitter);
+            const source = path.resolve(filePath);
+            const stream = createFileStream(source);
+            const size = await getFileSize(source);
+            const { levels, height, leafCount } = await generateMerkleTree({
+                stream: stream, 
+                size: size, 
+                chunkSize: DEFAULT_CHUNK_SIZE, 
+                emitter: emitter,
+                taskName: filePath
+            });
 
             expect(levels.length).toBe(height + 1);
             expect(leafCount).toBeGreaterThan(0);

@@ -3,9 +3,15 @@ import { createChild } from '../logger.js';
 import * as EVENTS from '../constants/events.constants.js';
 import * as MESSAGES from '../constants/messages.constants.js';
 import { calculateMessageSize } from '../utils/general.utils.js';
-import { createRejectionForMessage, createRejectionMessage, validateBaseMessage, verifyMessageSignature } from '../utils/protocol.utils.js';
 import { hex } from '../utils/crypto.utils.js';
 import { parseJSON } from '../utils/parsers.utils.js';
+import { FrameTypes } from './multiplexer.manager.js';
+import {
+    createRejectionForMessage,
+    createRejectionMessage,
+    validateBaseMessage,
+    verifyMessageSignature
+} from '../utils/protocol.utils.js';
 
 const logger = createChild('MessageManager');
 
@@ -15,6 +21,7 @@ export class MessageManager {
         this.sessionManager = managers.sessionManager;
         this.throttleManager = managers.throttleManager;
         this.socketManager = managers.socketManager;
+        this.muxManager = managers.muxManager;
 
         this.protocolHandlers = new Map();
         this.emitter = new EventEmitter();
@@ -47,7 +54,7 @@ export class MessageManager {
     async sendMessageToSocket(message, socket) {
         this.throttleManager.updateByMessage(message);
         const messageStr = JSON.stringify(message);
-        await socket.write(messageStr);
+        await this.muxManager.send(socket, messageStr, FrameTypes.JSON);
     }
 
     /**
@@ -90,6 +97,7 @@ export class MessageManager {
      * @param {Object} info - Additional information from node (derived from Hyperswarm connection).
      */
     async handleIncomingMessage(socket, raw, info) {
+        raw = raw.toString('utf8');
 
         const publicKey = hex(info.publicKey);
         logger.debug('Handling incomming message', {
@@ -157,7 +165,7 @@ export class MessageManager {
             if (this.messageConfig.allowThrottleRejection) {
                 await this.reject(socket, message, MESSAGES.MESSAGE_IS_DUPLICATED);
             }
-            
+
             return;
         }
 

@@ -12,6 +12,7 @@ import { createDatabase } from "../src/database/database.js";
 import { buildSpacePayload, generateSpaceSecret } from "../src/utils/space.utils.js";
 import { now } from "../src/utils/general.utils.js";
 import { buildProfilePayload } from "../src/utils/profile.utils.js";
+import { FrameTypes } from "../src/managers/multiplexer.manager.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,6 +50,15 @@ export function getMockSocket(name = 'mock socket') {
         write: vi.fn(),
         destroy: vi.fn()
     }
+}
+
+/**
+ * Removes the multiplexer header buffer from the json payload.
+ * @param {Buffer} buffer - The received buffer.
+ */
+export function unframeJson(buffer) {
+    const payload = buffer.subarray(5);
+    return payload.toString('utf8');
 }
 
 export async function buildTestSpacePayload(params) {

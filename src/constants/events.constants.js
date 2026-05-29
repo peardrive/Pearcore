@@ -48,3 +48,14 @@ export const SpaceMessage = "SpaceMessage";
  * update or an ownership-originated request.
  */
 export const ProfileUpdate = "ProfileUpdate";
+
+
+export const SpaceFileAction = "SpaceFileAction";
+
+export const SpaceFileActionOptions = {
+    ADD: 'add',
+    DELETE: 'delete',
+    SYNC: 'sync'  
+};
+
+export const SpaceFileRequest = "SpaceFileRequest";

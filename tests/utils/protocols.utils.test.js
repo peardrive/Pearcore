@@ -5,7 +5,7 @@ import * as protocolUtils from '../../src/utils/protocol.utils.js'
 import { generateSpaceSecret } from '../../src/utils/space.utils.js'
 import { buildTestProfilePayload, generateKeypair } from '../general.utils.js'
 
-const { hex } = cryptoUtils
+const { hex } = cryptoUtils;
 
 describe('Protocol Messages', () => {
     let secretKey, publicKey

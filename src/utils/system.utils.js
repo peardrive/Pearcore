@@ -38,6 +38,10 @@ export async function readFile(filePath, encoding = 'utf8') {
     }
 }
 
+export async function createDirectory() {
+
+}
+
 /**
  * Ensure a directory exists, creating it recursively if needed.
  * @param {string} dirPath
@@ -62,6 +66,11 @@ export async function listSubdirs(rootPath) {
   } catch {
     return []
   }
+}
+
+export async function getFileSize(filePath) {
+  const stat = await fs.stat(filePath);
+  return stat.size;
 }
 
 /**

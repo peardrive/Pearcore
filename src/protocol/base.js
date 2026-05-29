@@ -4,6 +4,9 @@ export class BaseProtocolHandler {
         this.sessionManager = managers.session;
         this.socketManager = managers.socket;
         this.messageManager = managers.message;
+        this.spaceFileListManager = managers.spaceFileList;
+        this.spaceFileManager = managers.spaceFiles;
+        this.muxManager = managers.mux;
 
         this.emitter = this.messageManager.emitter;
         this.emit = (event, callback) => this.emitter.emit(event, callback);

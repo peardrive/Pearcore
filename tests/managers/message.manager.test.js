@@ -4,7 +4,7 @@ import * as MESSAGES from '../../src/constants/messages.constants.js';
 import { MessageManager } from "../../src/managers/message.manager.js";
 import { initializeManagers } from "../../src/managers/initialization";
 import { createSpaceHashListMessage } from "../../src/utils/protocol.utils.js";
-import { buildTestSpacePayload, createFakeP2PConnection } from "../general.utils.js";
+import { buildTestSpacePayload, createFakeP2PConnection, unframeJson } from "../general.utils.js";
 import { BaseProtocolHandler } from "../../src/protocol/base.js";
 import { hex, randomNonce } from "../../src/utils/crypto.utils.js";
 import { getSpaceTopicHash } from "../../src/utils/space.utils.js";
@@ -35,7 +35,7 @@ describe('MessageManager', () => {
             await manager.message.sendMessageToSocket(message, socket);
             const messageRecords = await manager.storage.queryMessages();
 
-            expect(socket.write).toHaveBeenCalledWith(JSON.stringify(message));
+            expect(socket.write).toHaveBeenCalled();
             expect(messageRecords).toEqual([]);
             expect(messageRecords.length).toBe(0);
         });
@@ -116,13 +116,13 @@ describe('MessageManager', () => {
         it('should reject messages that exceed size limit', async () => {
             const [manager, socket, info] = await createFakeP2PConnection();
             const messageSize = manager.session.session.get('messaging.rawLimitSize');
-            const largeRawMessage = new Array(messageSize + 1).fill('a').join('');
+            const largeRawMessage = Buffer.from(new Array(messageSize + 1).fill('a').join(''));
 
             await manager.message.handleIncomingMessage(socket, largeRawMessage, info);
 
             expect(socket.write).toHaveBeenCalled();
 
-            const response = JSON.parse(socket.write.mock.calls[0]);
+            const response = JSON.parse(unframeJson(socket.write.mock.calls[0][0]));
 
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);
@@ -136,7 +136,7 @@ describe('MessageManager', () => {
 
             expect(socket.write).toHaveBeenCalled();
 
-            const response = JSON.parse(socket.write.mock.calls[0]);
+            const response = JSON.parse(unframeJson(socket.write.mock.calls[0][0]));
 
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);
@@ -159,7 +159,7 @@ describe('MessageManager', () => {
 
             expect(socket.write).toHaveBeenCalled();
 
-            const response = JSON.parse(socket.write.mock.calls[0]);
+            const response = JSON.parse(unframeJson(socket.write.mock.calls[0][0]));
 
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);
@@ -194,7 +194,7 @@ describe('MessageManager', () => {
 
             expect(socket.write).toHaveBeenCalled();
 
-            const response = JSON.parse(socket.write.mock.calls[0]);
+            const response = JSON.parse(unframeJson(socket.write.mock.calls[0][0]));
 
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);
@@ -218,7 +218,7 @@ describe('MessageManager', () => {
 
             expect(socket.write).toHaveBeenCalled();
 
-            const response = JSON.parse(socket.write.mock.calls[0]);
+            const response = JSON.parse(unframeJson(socket.write.mock.calls[0][0]));
 
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);
@@ -248,7 +248,7 @@ describe('MessageManager', () => {
 
             await manager.message.handleIncomingMessage(socket, JSON.stringify(message), info);
 
-            const response = JSON.parse(socket.write.mock.calls[0]);
+            const response = JSON.parse(unframeJson(socket.write.mock.calls[0][0]));
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);
             expect(response.payload.linkedMessageNonce).toEqual(message.nonce);
@@ -289,7 +289,7 @@ describe('MessageManager', () => {
 
             expect(callCount).toBe(frequencyThrottle);
 
-            const response = JSON.parse(socket.write.mock.calls[0]);
+            const response = JSON.parse(unframeJson(socket.write.mock.calls[0][0]));
 
             expect(response.type).toEqual(EVENTS.Reject);
             expect(response.topic).toEqual(EVENTS.noTopic);

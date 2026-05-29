@@ -57,7 +57,7 @@ describe('MessageService', () => {
                     }
                     else { failure(); }
                 })
-            }, { excludeIndices: [0] })
+            }, { excludeIndices: [0] });
 
             for (const node of sendResult) {
                 expect(publicKeyIsAllowedToRead(node.publicKey, goodSpace)).toBe(true);

@@ -105,6 +105,8 @@ export class AccountService {
     await this.managers.connection.init();
     // setup message throttler memory
     await this.managers.throttle.load();
+    // load space file lists 
+    await this.managers.spaceFiles.init();
 
     return {
       username: creds.username,
@@ -125,6 +127,8 @@ export class AccountService {
 
     this.managers.session.reset();
     this.managers.throttle.clear();
+    this.managers.spaceFileList.clear();
+    await this.managers.spaceFiles.stop();
   }
 
   /**

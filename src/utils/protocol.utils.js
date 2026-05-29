@@ -479,10 +479,10 @@ export async function createSpaceMessage({
     nonce,
     timestamp
 }) {
-    if (!topic) throw new Error('topic is required')
-    if (!messagePayload) throw new Error('messagePayload is required')
-    if (!secretKey) throw new Error('secretKey is required')
-    if (!publicKey) throw new Error('publicKey is required')
+    if (!topic) throw new Error('topic is required');
+    if (!messagePayload) throw new Error('messagePayload is required');
+    if (!secretKey) throw new Error('secretKey is required');
+    if (!publicKey) throw new Error('publicKey is required');
 
     return await createBaseMessage({
         type: EVENTS.SpaceMessage,
@@ -581,4 +581,62 @@ export async function decryptPayload({
     catch (error) {
         return null;
     }
+}
+
+export async function createSpaceFileAction({
+    topic,
+    action,
+    context,
+    publicKey,
+    secretKey,
+    nonce,
+    timestamp
+}) {
+    if (!topic) throw new Error('topic is required');
+    if (!action) throw new Error('action is required');
+    if (!context) throw new Error('context is required');
+    if (!secretKey) throw new Error('secretKey is required');
+    if (!publicKey) throw new Error('publicKey is required');
+
+    const payload = { action, context };
+
+    return await createBaseMessage({
+        type: EVENTS.SpaceFileAction,
+        topic,
+        payload: payload,
+        secretKey,
+        publicKey,
+        nonce,
+        timestamp
+    })
+}
+
+export async function createSpaceFileRequest({
+    topic,
+    taskKey,
+    rootHash,
+    spaceFilePath,
+    publicKey,
+    secretKey,
+    nonce,
+    timestamp
+}) {
+    if (!topic) throw new Error('topic is required');
+    if (!taskKey) throw new Error('action is required');
+    if (!rootHash) throw new Error('action is required');
+    if (!spaceFilePath) throw new Error('context is required');
+    if (!secretKey) throw new Error('secretKey is required');
+    if (!publicKey) throw new Error('publicKey is required');
+
+    const payload = { taskKey, spaceFilePath, rootHash };
+
+    return await createBaseMessage({
+        type: EVENTS.SpaceFileRequest,
+        topic,
+        payload: payload,
+        secretKey,
+        publicKey,
+        nonce,
+        timestamp
+    })
 }

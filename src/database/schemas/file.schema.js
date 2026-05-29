@@ -21,7 +21,6 @@ import { spaces } from "./space.schema.js";
 export const fileRegistry = sqliteTable('file_registry', {
     id: integer("id").primaryKey(),
 
-
     fileSourcePath: text("file_path").notNull(),
     timestamp: integer("timestamp").notNull(),
 

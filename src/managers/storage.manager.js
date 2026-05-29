@@ -27,6 +27,7 @@ import {
 } from "../utils/profile.utils.js"
 import { now } from '../utils/general.utils.js';
 import { hash, hex } from '../utils/crypto.utils.js';
+import { deleteFileRecord, generateFileRecord, getSpaceFromRegistryRecord, listFileRegisteryRecords, queryFileIndexRecord, queryFileRegistryRecords } from '../utils/files.utils.js';
 
 const logger = createChild('SpaceStorageManager');
 
@@ -92,7 +93,7 @@ export class StorageManager {
      */
     async deleteSpace(queryParams) {
         const spaceQuery = await querySpace(this.db, queryParams);
-        for (const space in spaceQuery) {
+        for (const space of spaceQuery) {
             await deleteSpace(this.db, space.spaceId);
         }
     }
@@ -435,5 +436,82 @@ export class StorageManager {
         hashList.push(...Object.keys(sharelinkTopicHashMap));
 
         return Array.from(new Set(hashList));
+    }
+
+    /**
+     * Create file record and generate indexing.
+     * @param {{ spaceName: string, publicKey: string, nonce: string }} params.space - Associated space to this file.
+     * @param {string} params.filePath - Local file path.
+     * @param {string} params.spacePath - Virtual directory path for space.
+     * @param {string} params.spaceFilename - Virtual file name for space.
+     * @param {EventEmitter} params.emitter - Optional emitter to track indexing progress.
+     * @returns {Promise<void>} Resolved when the indexing has been saved into database.
+     */
+    async createFileRecord(params) {
+        const {
+            space,
+            filePath,
+            spacePath,
+            spaceFilename,
+            emitter
+        } = params;
+
+        const { publicKey, spaceName, nonce } = space;
+        const spaceQuery = await querySpace(this.db, { publicKey, spaceName, nonce });
+        if (spaceQuery.length === 0) {
+            throw new Error('Space not found');
+        }
+
+        const { rootHash } = await generateFileRecord({
+            db: this.db,
+            spaceId: spaceQuery[0].id,
+            fileSourcePath: filePath,
+            spacePath: spacePath,
+            spaceFilename: spaceFilename,
+            emitter: emitter
+        });
+
+        return rootHash;
+    }
+
+    async queryFileRegistryRecords(filters) {
+        return await queryFileRegistryRecords(this.db, filters);
+    }
+
+    /**
+     * Get referenced space object from registry record.
+     * @param {Object} registryRecord - The file registry record object.
+     * @returns {Promise<Object>} - Resolves with associated space object.
+     */
+    async getSpaceFromFileRecord(registryRecord) {
+        const space = await getSpaceFromRegistryRecord(this.db, registryRecord);
+        return stripIds(space);
+    }
+
+    /**
+     * List of file registry records from database.
+     * @returns {Promise<Array<Object>>} Resolves when all records has been fetched.
+     */
+    async listFileRecords() {
+        const query = await listFileRegisteryRecords(this.db);
+        return query.map(item => stripIds(item));
+    }
+
+    /**
+     * Deletes a file record with all the indexing from the database.
+     * @param {Object} fileSourcePath - The file source path from registry record.
+     * @returns {Promise<Array>} - Resolves array of all deleted registry records.
+     */
+    async deleteFileRecords(fileSourcePath) {
+        const query = await queryFileRegistryRecords(
+            this.db,
+            { fileSourcePath }
+        );
+
+        for (const record in query) {
+            await deleteFileRecord(this.db, record.id);
+        }
+
+        return query;
     }
 }

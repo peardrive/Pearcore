@@ -28,6 +28,3 @@ export const BOOTSTRAP_HOST = process.env.BOOTSTRAP_HOST || '0.0.0.0'
  * Using parseInt ensures we get a number, not a string.
  */
 export const BOOTSTRAP_PORT = parseInt(process.env.BOOTSTRAP_PORT || '49737', 10)
-
-export const MAX_MESSAGE_THROTTLE = 5;        // seconds
-export const MAX_RESPOND_SLEEP_TIME = 5000;   // ms
