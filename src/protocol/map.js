@@ -1,36 +1,32 @@
 import * as EVENTS from '../constants/events.constants.js';
-import { SpaceFileActionHandler, SpaceFileRequestHandler } from './files.protocol.js';
+import { SpaceFileEventHandler } from './files.protocol.js';
 import { ProfileProtocolHandler } from './profile.protocol.js';
 import { RejectionProtocolHandler } from './rejection.protocol.js';
 import { SpaceHashListHandler, SpaceMessageHandler, SpaceSyncHandler } from './space.protocol.js';
 
-export const ProtocolMapFactory = (managers) => [
+export const ProtocolMapFactory = (emitter, managers) => [
     {
         type: EVENTS.Reject,
-        handler: new RejectionProtocolHandler(managers)
+        handler: new RejectionProtocolHandler(emitter, managers)
     },
     {
         type: EVENTS.ProfileUpdate,
-        handler: new ProfileProtocolHandler(managers)
+        handler: new ProfileProtocolHandler(emitter, managers)
     },
     {
         type: EVENTS.SpaceHashList,
-        handler: new SpaceHashListHandler(managers)
+        handler: new SpaceHashListHandler(emitter, managers)
     },
     {
         type: EVENTS.SpaceSync,
-        handler: new SpaceSyncHandler(managers)
+        handler: new SpaceSyncHandler(emitter, managers)
     },
     {
         type: EVENTS.SpaceMessage,
-        handler: new SpaceMessageHandler(managers)
+        handler: new SpaceMessageHandler(emitter, managers)
     },
     {
-        type: EVENTS.SpaceFileAction,
-        handler: new SpaceFileActionHandler(managers)
+        type: EVENTS.SpaceFileEvent,
+        handler: new SpaceFileEventHandler(emitter, managers)
     },
-    {
-        type: EVENTS.SpaceFileRequest,
-        handler: new SpaceFileRequestHandler(managers)
-    }
 ];

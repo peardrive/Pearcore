@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { vi } from 'vitest';
 import fs from "fs/promises";
 import { createWriteStream } from "fs";
-import { once } from "events";
+import EventEmitter, { once } from "node:events";
 import { randomFillSync } from 'crypto';
 import * as cryptoUtils from '../src/utils/crypto.utils.js';
 import { initializeManagers } from "../src/managers/initialization.js";
@@ -96,9 +96,10 @@ export async function buildTestProfilePayload(params = {}) {
 }
 
 export async function createManagerInstance() {
+    const emitter = new EventEmitter();
     const { db, sqlite } = await createTempDatabase();
     const { publicKey, secretKey } = await generateKeypair();
-    const managers = initializeManagers();
+    const managers = initializeManagers(emitter);
 
     managers.session.setDatabase({ db: db, sqlite: sqlite });
     managers.session.setCredentials({
@@ -106,7 +107,7 @@ export async function createManagerInstance() {
         secretKey: cryptoUtils.hex(secretKey)
     });
 
-    return managers;
+    return { ...managers, emitter };
 }
 
 export async function createFakeP2PConnection(name = 'testSubject') {
@@ -124,11 +125,45 @@ export async function createFakeP2PConnection(name = 'testSubject') {
 }
 
 /**
+ * Creates stack of [manager, socket, info]. 
+ * @param {number} numNodes 
+ * @returns {Array[]} returns array of fake P2P managers.
+ */
+export async function createP2PNetwork(numNodes) {
+    const nodes = [];
+    for (let index = 0; index < numNodes; index++) {
+        const [manager, socket, info] = await createFakeP2PConnection(`node-${index}`);
+        const { publicKey, secretKey } = manager.session.getCredentials();
+        nodes.push({ manager, socket, info, publicKey, secretKey });
+    }
+
+    return nodes;
+}
+
+/**
+ * Connects stack of P2P managers to each other using one space as topic subscription.
+ * @param {Object} space - The space to derive topic hash.
+ * @param {Array} nodes - stack of [manager, socket, info].
+ */
+export function createConnections(topicHash, nodes) {
+    for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
+        const currentNode = nodes[nodeIndex];
+
+        for (let selectIndex = 0; selectIndex < nodes.length; selectIndex++) {
+            if (selectIndex !== nodeIndex) {
+                const targetNode = nodes[selectIndex];
+                currentNode.manager.sockets.addSocket(targetNode.socket, targetNode.publicKey, [topicHash]);
+            }
+        }
+    }
+}
+
+/**
  * generates random port number
  * @returns {number}
  */
 export function getRandomPort() {
-    return 3000 + Math.floor(Math.random() * 2000)
+    return 2000 + Math.floor(Math.random() * 5000);
 }
 
 /**

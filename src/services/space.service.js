@@ -5,7 +5,7 @@ import { encodeShareLink, decodeShareLink } from "../utils/sharelink.utils.js";
 const logger = createChild('SpaceService');
 
 export class SpaceService {
-    constructor({ managers } = {}) {
+    constructor(emitter, { managers } = {}) {
         this.managers = managers;
         this.sharelinkPrefix = 'pearcore';
     }

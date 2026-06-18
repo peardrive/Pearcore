@@ -613,4 +613,187 @@ describe('Protocol Messages', () => {
             expect(decrypted).toEqual(originalPayload);
         })
     })
+
+    describe('validateSpaceFileEventPayload', () => {
+
+        const publicKey = 'a'.repeat(64);
+
+        const validAddEvent = {
+            action: 'add',
+            files: [
+                ['/file.mp4', publicKey, 1712345678, 'a'.repeat(64), 'a'.repeat(128)],
+                ['/movies/file2.mp4', publicKey, 1712345679, 'b'.repeat(64), 'b'.repeat(128)],
+            ],
+        };
+
+        const validRemoveEvent = {
+            action: 'remove',
+            files: [
+                ['/old.mp4', publicKey, 1712345680, 'c'.repeat(64), 'c'.repeat(128)],
+            ],
+        };
+
+        it('should return true for fully valid payload', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: [validAddEvent, validRemoveEvent],
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(true);
+            expect(result.reason).toBe('payload is valid');
+        });
+
+        it('should accept an empty events array', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: [],
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(true);
+            expect(result.reason).toBe('payload is valid');
+        });
+
+        it('should reject when payload is not an array', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: { foo: 'not an array' },
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(false);
+            expect(result.reason).toBe('payload should be an array');
+        });
+
+        it('should reject when payload contains non-object elements', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: ['string', 123, null],
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(false);
+            expect(result.reason).toBe('payload should contain only objects');
+        });
+
+        it('should reject when action is not in SpaceFileEvent', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: [{ action: 'random', files: [] }],
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(false);
+            expect(result.reason).toBe('event actions should be valid');
+        });
+
+        it('should reject when event lacks files array', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: [{ action: 'random', }], // no files key
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(false);
+            expect(result.reason).toBe('event actions should be valid');
+        });
+
+        it('should reject for invalid file path', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: [{ action: 'add', files: ['very^bad/path', 123, 'abc'] }], // bad file path
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(false);
+            expect(result.reason).toBe('event actions should be valid');
+        });
+
+        it('should reject for invalid timestamp', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: [{ action: 'add', files: ['movies/file.mp4', null, 'abc'] }], // null timestamp
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(false);
+            expect(result.reason).toBe('event actions should be valid');
+        });
+
+        it('should reject event with invalid signature format', async () => {
+            const message = await protocolUtils.createSpaceFileEventMessage({
+                topic: 'file-topic',
+                publicKey,
+                secretKey,
+                events: [{ action: 'add', files: ['movies/file.mp4', 123, 'xxx'] }], // null timestamp
+            });
+
+            const result = protocolUtils.validateSpaceFileEventPayload(message);
+            expect(result.isValid).toBe(false);
+            expect(result.reason).toBe('event actions should be valid');
+        });
+    });
+
+    describe('createSpaceFileRecordSignature', () => {
+        it('should create valid signature from file record', async () => {
+            const { publicKey, secretKey } = await generateKeypair();
+            const record = {
+                topic: 'topic',
+                path: '/file1.txt',
+                rootHash: 'hash1',
+                publicKey: publicKey,
+                timestamp: 1000
+            };
+
+            const signature = await protocolUtils.createSpaceFileRecordSignature({
+                ...record,
+                secretKey: secretKey
+            });
+
+            expect(typeof signature).toBe('string');
+            expect(signature.length).toBe(128);
+        });
+    });
+
+    describe('verifySpaceFileRecordSignature', () => {
+        it('should verify valid file record signature', async () => {
+            const { publicKey, secretKey } = await generateKeypair();
+            const record = {
+                topic: 'topic',
+                path: '/file1.txt',
+                rootHash: 'hash1',
+                publicKey: publicKey,
+                timestamp: 1000
+            };
+
+            const signature = await protocolUtils.createSpaceFileRecordSignature({
+                ...record,
+                secretKey: secretKey
+            });
+
+            const result = await protocolUtils.verifySpaceFileRecordSignature({
+                ...record,
+                signature
+            });
+
+            expect(result).toBe(true);
+        });
+    });
 })

@@ -50,15 +50,15 @@ export function createPreloadedProfile(publicKey) {
 export function validateProfileContext(profile) {
   const notNull = (obj) => obj !== null;
   const notUndefined = (obj) => obj !== undefined;
-  const shouldBeDefined = (obj) => notNull(obj) && notUndefined(obj);
+  const isDefined = (obj) => notNull(obj) && notUndefined(obj);
 
   const validationRules = [
-    ['username is required', () => shouldBeDefined(profile.username)],
-    ['tag is required', () => shouldBeDefined(profile.tag)],
+    ['username is required', () => isDefined(profile.username)],
+    ['tag is required', () => isDefined(profile.tag)],
     ['profileURL is required', () => notUndefined(profile.profileURL)],
-    ['publicKey is required', () => shouldBeDefined(profile.publicKey)],
-    ['signature is required', () => shouldBeDefined(profile.signature)],
-    ['timestamp is required', () => shouldBeDefined(profile.timestamp)],
+    ['publicKey is required', () => isDefined(profile.publicKey)],
+    ['signature is required', () => isDefined(profile.signature)],
+    ['timestamp is required', () => isDefined(profile.timestamp)],
 
     ['username should be string', () => typeof profile.username === 'string'],
     ['username should not a larger that 64 characters', () => profile.username.length <= 64],

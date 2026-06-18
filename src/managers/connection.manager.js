@@ -1,4 +1,4 @@
-import { EventEmitter } from "node:events";
+import * as EVENTS from '../constants/events.constants.js';
 import { createChild } from "../logger.js";
 import { hex, hexToUint8 } from "../utils/crypto.utils.js";
 import { connectSwarm, joinSwarmTopic } from "../utils/network.utils.js";
@@ -8,7 +8,7 @@ import { parseBootstrapAddress } from "../utils/parsers.utils.js";
 const logger = createChild('ConnectionManager');
 
 export class ConnectionManager {
-    constructor(managers) {
+    constructor(emitter, managers) {
         this.socketManager = managers.socketManager;
         this.messageManager = managers.messageManager;
         this.sessionManager = managers.sessionManager;
@@ -18,21 +18,11 @@ export class ConnectionManager {
         this.swarmInstance = null;
         this.discoveryMap = {};
 
-        this.emitter = new EventEmitter();
-    }
-
-    EVENTS = {
-        CONNECTION: 'connection',
-        DISCONNECT: 'disconnect',
-        HANDSHAKE: 'handshake'
+        this.emitter = emitter;
     }
 
     get connectionConfig() {
         return this.sessionManager.getConnectionConfig();
-    }
-
-    on(event, callback) {
-        this.emitter.on(event, callback);
     }
 
     /**
@@ -56,28 +46,27 @@ export class ConnectionManager {
 
             socket.on('data', async buffer => {
                 await this.muxManager.route(socket, buffer, info);
-                //await this.messageManager.handleIncomingMessage(socket, buffer.toString(), info);
             });
 
             socket.on('close', () => {
                 this.socketManager.removeSocket(socket);
                 this.muxManager.cleanup(info);
-                this.emitter.emit(this.EVENTS.DISCONNECT, { publicKey });
+                this.emitter.emit(EVENTS.Disconnect, { publicKey });
             });
             socket.on('error', (err) => {
                 logger.warn(`Socket connection error from peer ${publicKey}`, { error: err });
                 this.socketManager.removeSocket(socket);
                 this.muxManager.cleanup(info);
-                this.emitter.emit(this.EVENTS.DISCONNECT, { publicKey });
+                this.emitter.emit(EVENTS.Disconnect, { publicKey });
             })
 
             this.socketManager.addSocket(socket, publicKey, topics);
 
-            this.emitter.emit(this.EVENTS.CONNECTION, { publicKey, topics });
+            this.emitter.emit(EVENTS.Connection, { publicKey, topics });
 
             if (this.connectionConfig.enableHandshake) {
                 const context = await this.handshake(socket, info);
-                this.emitter.emit(this.EVENTS.HANDSHAKE, { publicKey, context });
+                this.emitter.emit(EVENTS.Handshake, { publicKey, context });
             }
         });
 

@@ -1,3 +1,4 @@
+import * as EVENTS from '../../src/constants/events.constants.js';
 import { describe, it, beforeEach, afterEach, expect } from "vitest";
 import { startBootstrapper } from "../../src/utils/network.utils";
 import { buildTestSpacePayload, createManagerInstance, getRandomPort } from "../general.utils";
@@ -47,12 +48,12 @@ describe('ConnectionManager', () => {
                 }
             };
 
-            primary.connection.on('connection', () => {
+            primary.emitter.on(EVENTS.Connection, () => {
                 primaryConnected = true;
                 checkAndResolve();
             });
 
-            secondary.connection.on('connection', () => {
+            secondary.emitter.on(EVENTS.Connection, () => {
                 secondaryConnected = true;
                 checkAndResolve();
             });

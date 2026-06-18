@@ -1,5 +1,5 @@
 import * as EVENTS from "../constants/events.constants.js";
-import { now, validateHexString, validateTimestamp } from './general.utils.js';
+import { isObject, isString, now, validateFilePath, validateHexString, validateTimestamp } from './general.utils.js';
 import { validateSpaceContext } from './space.utils.js';
 import {
     hex,
@@ -12,6 +12,7 @@ import {
     canonicalStringify,
 } from './crypto.utils.js';
 import { validateProfileContext } from "./profile.utils.js";
+import { notNull, notUndefined, isDefined, nonceIsValid, spaceSecretIsValid } from "./general.utils.js";
 
 /**
  * Generates deterministic nonce from object payload
@@ -22,6 +23,108 @@ export function generateNonceFromPayoad(payload) {
     const str = canonicalStringify(payload);
     const payloadHash = hex(hash(str));
     return payloadHash.slice(0, 24) // only the first 24 characters
+}
+
+/**
+ * Verify a signed message
+ * @param {object} message - The full signed message
+ * @returns {Promise<boolean>} True if the signature is valid, false otherwise
+ */
+export async function verifyMessageSignature(message) {
+    if (!message.signature || !message.publicKey) {
+        throw new Error('Message missing signature or publicKey')
+    }
+
+    if (typeof message.signature !== 'string') {
+        return false;
+    }
+
+    const hexRegex = /^[0-9a-fA-F]+$/;
+    if (!hexRegex.test(message.signature) || message.signature.length % 2 !== 0) {
+        return false;
+    }
+
+    const { signature, ...messageContext } = message
+
+    const isValid = await verifySignedJSON(messageContext, signature, messageContext.publicKey)
+    return isValid
+}
+
+/**
+ * Encrypt a message payload using the space secret.
+ *
+ * @param {Object} params
+ * @param {Object} params.payload - Plain JSON payload
+ * @param {string} params.spaceSecret - 32-byte hex symmetric key
+ * @param {string} params.nonce - 24 character hex string as cipher nonce.
+ *
+ * @returns {Promise<{ payload: string, nonce: string }>}
+ */
+export async function encryptPayload({
+    payload,
+    spaceSecret,
+    nonce
+}) {
+
+    if (!nonceIsValid(nonce)) throw new Error('nonce is invalid');
+    if (!spaceSecretIsValid(spaceSecret)) throw new Error('spaceSecret is invalid');
+
+    try {
+        const encrypted = await encryptJSON(
+            spaceSecret,
+            nonce,
+            payload
+        );
+
+        return encrypted;
+    }
+    catch (error) {
+        return null;
+    }
+}
+
+/**
+ * Decrypt a message payload using the space secret.
+ *
+ * @param {Object} params
+ * @param {string} params.payload - Encrypted payload (hex/base64 depending on your encryptJSON output)
+ * @param {string} params.spaceSecret - 32-byte hex symmetric key
+ * @param {string} params.nonce - 12-byte hex nonce used during encryption
+ *
+ * @returns {Promise<Object>} Decrypted JSON payload
+ */
+export async function decryptPayload({
+    payload,
+    spaceSecret,
+    nonce
+}) {
+    const isString = input => typeof input === 'string';
+
+    const nonceIsValid = nonce =>
+        isString(nonce) &&
+        validateHexString(nonce) &&
+        nonce.length === 24;
+
+    const spaceSecretIsValid = secret =>
+        isString(secret) &&
+        validateHexString(secret) &&
+        secret.length == 64;
+
+    if (!nonceIsValid(nonce)) throw new Error('nonce is invalid');
+    if (!spaceSecretIsValid(spaceSecret)) throw new Error('spaceSecret is invalid');
+
+    try {
+        const decrypted = await decryptJSON(
+            spaceSecret,
+            nonce,
+            payload
+        );
+
+        return decrypted;
+    }
+    catch (error) {
+        return null;
+    }
 }
 
 /**
@@ -65,12 +168,12 @@ export async function createBaseMessage({
         payload
     }
 
-    const signature = await signJSON(unsignedMsg, secretKey)
+    const signature = await signJSON(unsignedMsg, secretKey);
 
     return {
         ...unsignedMsg,
         signature
-    }
+    };
 }
 
 /**
@@ -78,17 +181,13 @@ export async function createBaseMessage({
  * @param {Object} message - the message object to validate
  */
 export function validateBaseMessage(message) {
-    const notNull = (obj) => obj !== null;
-    const notUndefined = (obj) => obj !== undefined;
-    const shouldBeDefined = (obj) => notNull(obj) && notUndefined(obj);
-
     const validationRules = [
-        ['type is required', () => shouldBeDefined(message.type)],
-        ['topic is required', () => shouldBeDefined(message.topic)],
-        ['publicKey is required', () => shouldBeDefined(message.publicKey)],
-        ['nonce is required', () => shouldBeDefined(message.nonce)],
-        ['timestamp is required', () => shouldBeDefined(message.timestamp)],
-        ['signature is required', () => shouldBeDefined(message.signature)],
+        ['type is required', () => isDefined(message.type)],
+        ['topic is required', () => isDefined(message.topic)],
+        ['publicKey is required', () => isDefined(message.publicKey)],
+        ['nonce is required', () => isDefined(message.nonce)],
+        ['timestamp is required', () => isDefined(message.timestamp)],
+        ['signature is required', () => isDefined(message.signature)],
 
         ['type should be a string', () => typeof message.type === 'string'],
         ['type should not be larger than 64 characters', () => message.type.length <= 64],
@@ -124,31 +223,6 @@ export function validateBaseMessage(message) {
         isValid: true,
         reason: 'message is valid'
     };
-}
-
-/**
- * Verify a signed message
- * @param {object} message - The full signed message
- * @returns {Promise<boolean>} True if the signature is valid, false otherwise
- */
-export async function verifyMessageSignature(message) {
-    if (!message.signature || !message.publicKey) {
-        throw new Error('Message missing signature or publicKey')
-    }
-
-    if (typeof message.signature !== 'string') {
-        return false;
-    }
-
-    const hexRegex = /^[0-9a-fA-F]+$/;
-    if (!hexRegex.test(message.signature) || message.signature.length % 2 !== 0) {
-        return false;
-    }
-
-    const { signature, ...messageContext } = message
-
-    const isValid = await verifySignedJSON(messageContext, signature, messageContext.publicKey)
-    return isValid
 }
 
 /**
@@ -285,14 +359,14 @@ export function validateProfileUpdateMessagePayload(message) {
     }
 
     const isString = item => typeof item === 'string';
-    const containsCharacters = (item, length) => item.length === length;
-    const shouldBeValidTopic = item => {
-        return isString(item) && containsCharacters(item, 64) && validateHexString(item)
+    const hasExactLength = (item, length) => item.length === length;
+    const isValidTopic = item => {
+        return isString(item) && hasExactLength(item, 64) && validateHexString(item)
     };
 
     const topicsRules = [
         ['topics should be an array', () => Array.isArray(topics)],
-        ['topics should contain 64 character hex strings', () => topics.every(item => shouldBeValidTopic(item))],
+        ['topics should contain 64 character hex strings', () => topics.every(item => isValidTopic(item))],
     ];
 
     for (const [reason, condition] of topicsRules) {
@@ -496,114 +570,32 @@ export async function createSpaceMessage({
 }
 
 /**
- * Encrypt a message payload using the space secret.
- *
+ * Creates a signed space file event list.
  * @param {Object} params
- * @param {Object} params.payload - Plain JSON payload
- * @param {string} params.spaceSecret - 32-byte hex symmetric key
- * @param {string} params.nonce - 24 character hex string as cipher nonce.
- *
- * @returns {Promise<{ payload: string, nonce: string }>}
+ * @param {string} params.topic - Topic the message belongs
+ * @param {Array} params.events - List of events in format of { action, files }
+ * @param {Uint8Array} params.secretKey - Sender's Ed25519 secret key
+ * @param {Uint8Array} params.publicKey - Sender's Ed25519 public key
+ * @param {string} [params.nonce] - Optional pre-generated nonce (hex)
+ * @param {number} [params.timestamp] - Optional timestamp override
+ * @returns 
  */
-export async function encryptPayload({
-    payload,
-    spaceSecret,
-    nonce
-}) {
-    const isString = input => typeof input === 'string';
-
-    const nonceIsValid = nonce =>
-        isString(nonce) &&
-        validateHexString(nonce) &&
-        nonce.length === 24;
-
-    const spaceSecretIsValid = secret =>
-        isString(secret) &&
-        validateHexString(secret) &&
-        secret.length == 64;
-
-    if (!nonceIsValid(nonce)) throw new Error('nonce is invalid');
-    if (!spaceSecretIsValid(spaceSecret)) throw new Error('spaceSecret is invalid');
-
-    try {
-        const encrypted = await encryptJSON(
-            spaceSecret,
-            nonce,
-            payload
-        );
-
-        return encrypted;
-    }
-    catch (error) {
-        return null;
-    }
-}
-
-/**
- * Decrypt a message payload using the space secret.
- *
- * @param {Object} params
- * @param {string} params.payload - Encrypted payload (hex/base64 depending on your encryptJSON output)
- * @param {string} params.spaceSecret - 32-byte hex symmetric key
- * @param {string} params.nonce - 12-byte hex nonce used during encryption
- *
- * @returns {Promise<Object>} Decrypted JSON payload
- */
-export async function decryptPayload({
-    payload,
-    spaceSecret,
-    nonce
-}) {
-    const isString = input => typeof input === 'string';
-
-    const nonceIsValid = nonce =>
-        isString(nonce) &&
-        validateHexString(nonce) &&
-        nonce.length === 24;
-
-    const spaceSecretIsValid = secret =>
-        isString(secret) &&
-        validateHexString(secret) &&
-        secret.length == 64;
-
-    if (!nonceIsValid(nonce)) throw new Error('nonce is invalid');
-    if (!spaceSecretIsValid(spaceSecret)) throw new Error('spaceSecret is invalid');
-
-    try {
-        const decrypted = await decryptJSON(
-            spaceSecret,
-            nonce,
-            payload
-        );
-
-        return decrypted;
-    }
-    catch (error) {
-        return null;
-    }
-}
-
-export async function createSpaceFileAction({
+export async function createSpaceFileEventMessage({
     topic,
-    action,
-    context,
+    events,
     publicKey,
     secretKey,
     nonce,
     timestamp
 }) {
     if (!topic) throw new Error('topic is required');
-    if (!action) throw new Error('action is required');
-    if (!context) throw new Error('context is required');
     if (!secretKey) throw new Error('secretKey is required');
     if (!publicKey) throw new Error('publicKey is required');
 
-    const payload = { action, context };
-
     return await createBaseMessage({
-        type: EVENTS.SpaceFileAction,
+        type: EVENTS.SpaceFileEvent,
         topic,
-        payload: payload,
+        payload: events,
         secretKey,
         publicKey,
         nonce,
@@ -611,7 +603,97 @@ export async function createSpaceFileAction({
     })
 }
 
-export async function createSpaceFileRequest({
+// List of file event actions as an array
+const fileEventActions = Object.values(EVENTS.SpaceFileEventOptions);
+
+// validates individual events from spaceFileEvent message
+const validateEvent = event => {
+    if (!fileEventActions.includes(event.action)) return false;
+    if (!Array.isArray(event.files)) return false;
+
+    for (const file of event.files) {
+        const [filepath, publicKey, timestamp, rootHash, signature] = file;
+
+        if (!isString(filepath) || !validateFilePath(filepath)) return false;
+        if (!isString(publicKey) || publicKey.length !== 64) return false;
+        if (!validateTimestamp(timestamp)) return false;
+        if (
+            !isString(signature) ||
+            signature.length !== 128 ||
+            !validateHexString(signature)
+        ) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Validates SpaceFileEvent message.
+ * @param {Object} message - The SpaceFileEvent message
+ * @returns {{ isValid: Boolean, reason: string }}
+ */
+export function validateSpaceFileEventPayload(message) {
+    // refering to message payload as "events"
+    const { payload: events } = message;
+
+    const rules = [
+        ['payload should be an array', () => Array.isArray(events)],
+        ['payload should contain only objects', () => events.every(isObject)],
+        ['event actions should be valid', () => events.every(validateEvent)]
+    ];
+
+    for (const [reason, condition] of rules) {
+        if (!condition()) {
+            return {
+                isValid: false,
+                reason: reason
+            };
+        }
+    }
+
+    return {
+        isValid: true,
+        reason: 'payload is valid'
+    };
+}
+
+/**
+ * Create space file event signature.
+ * @param {Object} record 
+ * @param {string} record.topic - Space topic hash.
+ * @param {string} record.path - Space file path.
+ * @param {string} record.publicKey - 64-character hex string publickey.
+ * @param {number} record.timestamp - File record timestamp.
+ * @param {string} record.rootHash - File Merkle-tree root hash.
+ * @param {string} record.signature - File record signature.
+ * @returns {Promise<string>}
+ */
+export async function createSpaceFileRecordSignature(record) {
+    const { topic, path, publicKey, timestamp, rootHash, secretKey } = record;
+    const payload = { topic, path, publicKey, timestamp, rootHash };
+    return await signJSON(payload, secretKey);
+}
+
+/**
+ * Verify space file event signature.
+ * @param {Object} record 
+ * @param {string} record.topic - Space topic hash.
+ * @param {string} record.path - Space file path.
+ * @param {string} record.publicKey - 64-character hex string publickey.
+ * @param {number} record.timestamp - File record timestamp.
+ * @param {string} record.rootHash - File Merkle-tree root hash.
+ * @param {string} record.signature - File record signature.
+ * @returns {Promise<boolean>}
+ */
+export async function verifySpaceFileRecordSignature(record) {
+    const { topic, path, publicKey, timestamp, rootHash, signature } = record;
+    const payload = { topic, path, publicKey, timestamp, rootHash };
+    return await verifySignedJSON(payload, signature, publicKey);
+}
+
+export async function createSpaceFileTreeRequestMessage({
     topic,
     taskKey,
     rootHash,
@@ -628,7 +710,36 @@ export async function createSpaceFileRequest({
     if (!secretKey) throw new Error('secretKey is required');
     if (!publicKey) throw new Error('publicKey is required');
 
-    const payload = { taskKey, spaceFilePath, rootHash };
+    const payload = {spaceFilePath, rootHash };
+
+    return await createBaseMessage({
+        type: EVENTS.SpaceFileRequest,
+        topic,
+        payload: payload,
+        secretKey,
+        publicKey,
+        nonce,
+        timestamp
+    })
+}
+
+export async function createSpaceFileTreeResponseMessage({
+    topic,
+    taskKey,
+    rootHash,
+    spaceFilePath,
+    publicKey,
+    secretKey,
+    nonce,
+    timestamp
+}) {
+    if (!topic) throw new Error('topic is required');
+    if (!rootHash) throw new Error('action is required');
+    if (!spaceFilePath) throw new Error('context is required');
+    if (!secretKey) throw new Error('secretKey is required');
+    if (!publicKey) throw new Error('publicKey is required');
+
+    const payload = { spaceFilePath, rootHash, totalLeafs, storedLeafs };
 
     return await createBaseMessage({
         type: EVENTS.SpaceFileRequest,

@@ -5,12 +5,13 @@ import { publicKeyIsAllowedToRead } from '../utils/policy.utils.js';
 import { encryptJSON, hex, randomNonce } from '../utils/crypto.utils.js';
 
 export class MessageService {
-    constructor({ managers }) {
+    constructor(emitter, { managers }) {
+        this.emitter = emitter;
         this.managers = managers;
 
         // links: message nonce -> callback function
         this.nonceStack = new Map();
-        this.managers.message.on(EVENTS.Reject, (context) => {
+        this.emitter.on(EVENTS.Reject, (context) => {
             const nonce = context.linkedMessageNonce;
             const fn = this.nonceStack.get(nonce);
 

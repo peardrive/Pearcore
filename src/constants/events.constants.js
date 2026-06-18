@@ -1,4 +1,11 @@
 /**
+ * Emitted for initating or destroying socket connections
+ */
+export const Connection = 'Connection';
+export const Disconnect = 'Disconnect';
+export const Handshake = 'Handshake';
+
+/**
  * Topic payload when message does not belong to dedicated topic.
  */
 export const noTopic = 'noTopic';
@@ -49,13 +56,20 @@ export const SpaceMessage = "SpaceMessage";
  */
 export const ProfileUpdate = "ProfileUpdate";
 
+/**
+ * Emitted when a file action (add/remove/merge) has been emitted within the space.
+ */
+export const SpaceFileEvent = "SpaceFileEvent";
 
-export const SpaceFileAction = "SpaceFileAction";
-
-export const SpaceFileActionOptions = {
+/**
+ * All event options for space file.
+ */
+export const SpaceFileEventOptions = {
     ADD: 'add',
-    DELETE: 'delete',
-    SYNC: 'sync'  
+    REMOVE: 'remove',
 };
 
+/**
+ * Emitted when peer wants to ask for file tree information from connected node.
+ */
 export const SpaceFileRequest = "SpaceFileRequest";

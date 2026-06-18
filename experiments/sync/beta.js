@@ -55,7 +55,7 @@ async function main() {
     // Handle incoming file announcements – auto‑download / delete / sync
     // All files are stored under the user‑provided downloadDir (single hierarchy).
     // ------------------------------------------------------------------
-    core.managers.message.on(EVENTS.SpaceFileAction, async (message) => {
+    core.emitter.on(EVENTS.SpaceFileAction, async (message) => {
         console.log('[SpaceFileAction]', message);
         const { action, context } = message.payload;
 
@@ -138,7 +138,7 @@ async function main() {
         console.log('[FileListMap]', core.managers.spaceFileList.fileListMap);
     });
 
-    core.managers.message.on(EVENTS.SpaceSync, async (c) => {
+    core.emitter.on(EVENTS.SpaceSync, async (c) => {
         console.log('[SpaceSync]', c);
     });
 

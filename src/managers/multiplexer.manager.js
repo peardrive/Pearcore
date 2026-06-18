@@ -57,7 +57,7 @@ export const FrameTypes = {
  *   await muxManager.send(socket, buffer, FrameTypes.STREAM);
  */
 export class MuxManager {
-    constructor() {
+    constructor(emitter) {
         this.routingMap = new Map();
         this._buffers = new Map();
     }

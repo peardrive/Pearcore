@@ -85,7 +85,7 @@ describe('MessageManager', () => {
                 }
             }
 
-            const testHandler = new TestProtocolHandler(manager);
+            const testHandler = new TestProtocolHandler(manager.emitter, manager);
             const protocols = [
                 {
                     type: EVENTS.SpaceHashList,
@@ -104,8 +104,8 @@ describe('MessageManager', () => {
             let firstCallbackCalled = false;
             let secondCallbackCalled = false;
 
-            manager.message.on(EVENTS.SpaceHashList, () => { firstCallbackCalled = true; });
-            manager.message.on(EVENTS.SpaceHashList, () => { secondCallbackCalled = true; });
+            manager.emitter.on(EVENTS.SpaceHashList, () => { firstCallbackCalled = true; });
+            manager.emitter.on(EVENTS.SpaceHashList, () => { secondCallbackCalled = true; });
 
             await manager.message.handleIncomingMessage(socket, JSON.stringify(message), info);
 
@@ -240,7 +240,7 @@ describe('MessageManager', () => {
             });
 
             let callCount = 0;
-            manager.message.on(EVENTS.SpaceHashList, () => { callCount++; });
+            manager.emitter.on(EVENTS.SpaceHashList, () => { callCount++; });
 
             await manager.message.handleIncomingMessage(socket, JSON.stringify(message), info);
             expect(callCount).toBe(1);
@@ -269,7 +269,7 @@ describe('MessageManager', () => {
             const { frequencyThrottle, maxQuarantineTime } = messageConfig;
 
             let callCount = 0;
-            manager.message.on(EVENTS.SpaceHashList, () => { callCount++; })
+            manager.emitter.on(EVENTS.SpaceHashList, () => { callCount++; })
 
             const createMessage = async () => {
                 const space = await buildTestSpacePayload();

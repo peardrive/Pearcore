@@ -2,7 +2,7 @@ import { createPreloadedProfile } from '../utils/profile.utils.js';
 import { createProfileUpdateMessage } from '../utils/protocol.utils.js';
 
 export class ProfileService {
-  constructor({ managers }) {
+  constructor(emitter, { managers }) {
     this.managers = managers;
   }
 

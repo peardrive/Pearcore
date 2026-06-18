@@ -32,7 +32,7 @@ import { deleteFileRecord, generateFileRecord, getSpaceFromRegistryRecord, listF
 const logger = createChild('SpaceStorageManager');
 
 export class StorageManager {
-    constructor({ sessionManager }) {
+    constructor(emitter, { sessionManager }) {
         this.sessionManager = sessionManager
     }
 
@@ -177,13 +177,13 @@ export class StorageManager {
      * @returns {Promise<Array>} array of message records with isRelay as boolean
      */
     async queryMessages(filters = {}) {
-        const shouldBeDefined = obj => obj !== null && obj !== undefined;
+        const isDefined = obj => obj !== null && obj !== undefined;
         const shouldBeString = obj => typeof obj === 'string';
 
         const { sharelink, ...baseFilters } = filters;
         let resolvedFilters = baseFilters;
 
-        if (shouldBeDefined(sharelink) && shouldBeString(sharelink)) {
+        if (isDefined(sharelink) && shouldBeString(sharelink)) {
             const decoded = decodeShareLink(sharelink)
             if (decoded) {
                 const topic = generateSpaceTopic(
@@ -224,13 +224,13 @@ export class StorageManager {
      * @returns {Promise<Array>} array of deleted message records with isRelay as boolean
      */
     async flushMessages(filters = {}) {
-        const shouldBeDefined = obj => obj !== null && obj !== undefined;
+        const isDefined = obj => obj !== null && obj !== undefined;
         const shouldBeString = obj => typeof obj === 'string';
 
         const { sharelink, ...baseFilters } = filters;
         let resolvedFilters = baseFilters;
 
-        if (shouldBeDefined(sharelink) && shouldBeString(sharelink)) {
+        if (isDefined(sharelink) && shouldBeString(sharelink)) {
             const decoded = decodeShareLink(sharelink)
             if (decoded) {
                 const topic = generateSpaceTopic(

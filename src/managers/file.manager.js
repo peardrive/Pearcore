@@ -1,390 +1,319 @@
-import path from "path";
-import { SpaceFileActionOptions } from '../constants/events.constants.js';
-import { fileExists } from "../utils/system.utils.js";
-import { createWatcher, WatchTypes } from "../utils/files.utils.js";
-import { getSpaceTopicHash } from "../utils/space.utils.js";
-import { createSpaceFileAction, createSpaceFileRequest } from "../utils/protocol.utils.js";
-import { publicKeyIsAllowedToBroadcast, publicKeyIsAllowedToRead } from "../utils/policy.utils.js";
-import crypto from 'crypto';
-import fs from 'fs';
+import { verifySignedJSON } from "../utils/crypto.utils";
 
+/**
+ * Manages file availability metadata for space.
+ * 
+ * This class maintains a nested map that tracks which peers provide which
+ * file variants (identified by Merkle root hashes) within a space. Each
+ * file path can have multiple variants, but a given public key may appear
+ * in at most one variant per path. 
+ * 
+ * Timestamps are used to resolve conflicts: an incoming record is only 
+ * applied if its timestamp is strictly greater than the locally
+ * stored timestamp. The local node is considered the sole authority 
+ * for its own public key; any external claim about the local key is ignored during
+ * merges.
+ * 
+ * @example
+ * const sessionManager = new sessionManager();
+ * const manager = new SpaceFileListManager({ sessionManager });
+ *
+ * // Peer A announces file "/doc.txt" with variant "abc" at timestamp 1000
+ * manager.add({
+ *   topic: 'space1',
+ *   path: '/doc.txt',
+ *   rootHash: 'abc',
+ *   publicKey: 'A',
+ *   timestamp: 1000,
+ *   signature: '...'
+ * });
+ * 
+ * // A later moves to variant "def" (timestamp 2000)
+ * manager.add({
+ *   topic: 'space1',
+ *   path: '/doc.txt',
+ *   rootHash: 'def',
+ *   publicKey: 'A',
+ *   timestamp: 2000,
+ *   signature: '...'
+ * });
+ * 
+ * // Now "/doc.txt" only lists variant "def" with peer "A" (timestamp 2000).
+ *
+ * // Removing peer A (unconditional, no timestamp needed)
+ * manager.remove({ topic: 'space1', path: '/doc.txt', publicKey: 'A' });
+ *
+ * // Merge a remote file list (e.g. received via gossip)
+ * manager.merge({
+ *   topic: 'space1',
+ *   fileList: {
+ *     '/doc.txt': {
+ *       'xyz': { peers: { 'B': { timestamp: 2000, signature: '...' } } }
+ *     }
+ *   }
+ * });
+ *
+ * // Query the current state
+ * console.log(manager.get('space1'));
+ */
 export class SpaceFileListManager {
-    constructor(managers) {
-        this.storageManager = managers.storageManager;
+    constructor(emitter, managers) {
         this.sessionManager = managers.sessionManager;
 
-        this.fileListMap = {};
+        this.spaceFileMap = {};
     }
 
-    getFileList(topic) {
-        return this.fileListMap[topic] || {};
+    /**
+     * Get space's file list using space topic hash
+     * @param {string} topic 
+     * @returns {Object}
+     */
+    get(topic) {
+        return this.spaceFileMap[topic] || {};
     }
 
     clear() {
-        this.fileListMap = {};
+        this.spaceFileMap = {};
     }
 
     /**
-     * Add new file record to hierarcy.
-     * @param {Object} record 
-     * @param {string} record.topic - Space topic hash
-     * @param {string} record.spaceFilePath - Full space file path (spacePath + spaceFilename)
-     * @param {Object} record.info - Peer info including identity and file hash.
-     * @param {string} record.info.publicKey - Peer's publicKey.
-     * @param {string} record.info.rootHash - The root hash of the file record from Merkle Tree.
+     * Convert the list structure for into a stack (flat array).
+     * @param {Object} spaceFiles - Space file list.
+     * @returns {Array<Object>} Stack array of { filepath, publickey, timestamp, rootHash, signature }
      */
-    addFile(record) {
-        const { topic, spaceFilePath, info } = record;
+    convertListToStack(spaceFiles) {
+        const stack = [];
 
-        this.removeFile(record);
+        for (const [filepath, variants] of Object.entries(spaceFiles)) {
 
-        if (!this.fileListMap[topic]) {
-            this.fileListMap[topic] = {};
+            for (const [rootHash, variant] of Object.entries(variants)) {
+
+                const peers = variant.peers || {};
+                for (const [publicKey, info] of Object.entries(peers)) {
+                    const { timestamp, signature } = info;
+
+                    stack.push([filepath, publicKey, timestamp, rootHash, signature]);
+                }
+            }
+
         }
 
-        const hierarchy = this.fileListMap[topic];
-
-        if (!hierarchy[spaceFilePath]) {
-            hierarchy[spaceFilePath] = [];
-        }
-
-        const variants = hierarchy[spaceFilePath];
-        let targetVariant = variants.find(v => v.rootHash === info.rootHash);
-
-        if (!targetVariant) {
-            targetVariant = { rootHash: info.rootHash, peers: [] };
-            variants.push(targetVariant);
-        }
-
-        if (!targetVariant.peers.includes(info.publicKey)) {
-            targetVariant.peers.push(info.publicKey);
-        }
+        return stack;
     }
 
     /**
-     * Remove peer as provider from single file's provider list.
-     * @param {Object} record 
-     * @param {string} record.topic - Space topic hash
-     * @param {string} record.spaceFilePath - Full space file path (spacePath + spaceFilename)
-     * @param {Object} record.info - Peer info including identity and file hash.
-     * @param {string} record.info.publicKey - Peer's publicKey.
-     * @param {string} record.info.rootHash - The root hash of the file record from Merkle Tree.
+     * Convert a stack (flat array) into a list structure for a given topic.
+     * @param {Array<Object>} stack - Stack array of { filepath, publickey, timestamp, rootHash, signature }.
+     * @returns {Object} List structure ready to be used with merge() or diff().
      */
-    removeFile(record) {
-        const { topic, spaceFilePath, info } = record;
+    convertStackToList(stack) {
+        const fileList = {};
 
-        if (!this.fileListMap[topic]) return;
+        for (const entry of stack) {
+            const [filepath, publicKey, timestamp, rootHash, signature] = entry;
 
-        const hierarchy = this.fileListMap[topic];
+            if (!fileList[filepath]) fileList[filepath] = {};
+            if (!fileList[filepath][rootHash]) {
+                fileList[filepath][rootHash] = { peers: {} };
+            }
 
-        if (!hierarchy[spaceFilePath]) return;
+            const variant = fileList[filepath][rootHash];
+            const existing = variant.peers[publicKey];
 
-        const variants = hierarchy[spaceFilePath];
-        const newVariants = [];
-
-        for (const variant of variants) {
-            const newPeers = variant.peers.filter(pk => pk !== info.publicKey);
-            if (newPeers.length > 0) {
-                newVariants.push({ ...variant, peers: newPeers });
+            if (!existing || timestamp > existing.timestamp) {
+                variant.peers[publicKey] = { timestamp, signature };
             }
         }
 
-        if (newVariants.length > 0) {
-            hierarchy[spaceFilePath] = newVariants;
-        } else {
-            delete hierarchy[spaceFilePath];
+        return fileList;
+    }
+
+    /**
+     * Add a new file registry to the space.
+     * @param {Object} context 
+     * @param {string} context.topic - Space topic hash
+     * @param {string} context.path - Space file path
+     * @param {string} context.rootHash - File's merkle tree root hash
+     * @param {string} context.publicKey - Peer publicKey
+     * @param {Number} context.timestamp - File's action event timestamp 
+     */
+    add(context) {
+        const { topic, path, rootHash, publicKey, timestamp, signature } = context;
+
+        // get space file list, create object map if not exists
+        if (!this.spaceFileMap[topic]) { this.spaceFileMap[topic] = {}; }
+        const spaceFiles = this.spaceFileMap[topic];
+
+        // file path does not exists in the map
+        // register the path and add the provider
+        if (!spaceFiles[path]) {
+            spaceFiles[path] = {
+                [rootHash]: {
+                    peers: { [publicKey]: { timestamp, signature } }
+                }
+            };
+
+            return;
+        }
+
+        const variants = spaceFiles[path];
+
+        // remove the peer as provider of other variants of the file path
+        for (const [existingRootHash, variant] of Object.entries(variants)) {
+            if (existingRootHash !== rootHash && publicKey in variant.peers) {
+                // avoid the action if local timestamp is newer
+                const currentTimestamp = variant.peers[publicKey].timestamp;
+                if (currentTimestamp >= timestamp) return;
+
+                delete variant.peers[publicKey];
+
+                if (Object.keys(variant.peers).length === 0) {
+                    delete variants[existingRootHash];
+                }
+
+                break;
+            }
+        }
+
+        if (!variants[rootHash]) {
+            variants[rootHash] = {
+                peers: { [publicKey]: { timestamp, signature } }
+            };
+
+            return;
+        }
+
+        const variant = variants[rootHash];
+        const existingEntry = variant.peers[publicKey];
+
+        if (existingEntry && existingEntry.timestamp >= timestamp) return;
+
+        // update the provider registry timestamp
+        variant.peers[publicKey] = { timestamp, signature };
+    }
+
+    /**
+     * Remove publicKey as a provider for file path
+     * @param {Object} context 
+     * @param {string} context.topic - Space topic hash
+     * @param {string} context.path - Space file path
+     * @param {string} context.publicKey - Peer publicKey
+     */
+    remove(context) {
+        const { topic, path, publicKey } = context;
+        const spaceFiles = this.spaceFileMap[topic];
+        if (!spaceFiles) return;
+
+        const variants = spaceFiles[path];
+        if (!variants) return;
+
+        for (const [rootHash, variant] of Object.entries(variants)) {
+            if (publicKey in variant.peers) {
+                delete variant.peers[publicKey];
+
+                // delete the variant if no provider has left after delettion
+                if (Object.keys(variant.peers).length === 0) {
+                    delete variants[rootHash];
+                }
+
+                break;
+            }
+        }
+
+        // cleanup file path if no variant has been left
+        if (Object.keys(variants).length === 0) {
+            delete spaceFiles[path];
+        }
+
+        // remove topic from the map if left empty
+        if (Object.keys(spaceFiles).length === 0) {
+            delete this.spaceFileMap[topic];
         }
     }
 
     /**
-     * Merge a remote file hierarchy into the local hierarchy.
-     * @param {Object} remoteHierarchy - The remote hierarchy to merge.
+     * Merge external space file list with the internal record.
+     * @param {Object} context 
+     * @param {string} context.topic - Space topic hash.
+     * @param {Object} context.fileList - External space file list for merge
      */
-    mergeHierarchy(topic, remoteHierarchy) {
-        const entries = Object.entries(remoteHierarchy);
-        for (const [spaceFilePath, variants] of entries) {
-            // add all variants one by one
-            for (const variant of variants) {
+    merge(context) {
+        const { topic, fileList } = context;
+        const { publicKey: localPublicKey } = this.sessionManager.getCredentials();
+
+        for (const [path, variants] of Object.entries(fileList)) {
+            for (const [rootHash, variant] of Object.entries(variants)) {
+                // skip if the provider list is empty
                 if (!variant.peers) continue;
 
-                for (const publicKey of variant.peers) {
-                    this.addFile({
-                        topic: topic,
-                        spaceFilePath,
-                        info: {
-                            publicKey,
-                            rootHash: variant.rootHash
-                        }
-                    });
+                for (const [publicKey, info] of Object.entries(variant.peers)) {
+                    const { timestamp, signature } = info;
+                    // add the provider registry only if it's foreign publicKey
+                    if (publicKey !== localPublicKey) {
+                        this.add({ topic, path, rootHash, publicKey, timestamp, signature });
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Creates new file list that is the substraction of remote and local file list.
+     * @param {Object} context 
+     * @param {string} context.topic - Space topic hash.
+     * @param {Object} context.fileList - External space file list for substraction
+     * @returns {Object} Returns substracted file list.
+     */
+    diff(context) {
+        const { topic, fileList, mode = 'add' } = context;
+        const { publicKey: localPublicKey } = this.sessionManager.getCredentials();
+
+        const localSpace = this.spaceFileMap[topic] || {};
+
+        const diffResult = {};
+
+        for (const [path, remoteVariants] of Object.entries(fileList)) {
+            const localPath = localSpace[path];
+
+            for (const [rootHash, remoteVariant] of Object.entries(remoteVariants)) {
+                const localVariant = localPath?.[rootHash];
+                const remotePeers = remoteVariant.peers || {};
+
+                const relevantPeers = {};
+
+                for (const [publicKey, remoteInfo] of Object.entries(remotePeers)) {
+                    if (publicKey === localPublicKey) continue;
+
+                    const localPeerInfo = localVariant?.peers?.[publicKey];
+                    const localTimestamp = localPeerInfo?.timestamp ?? null;
+
+                    if (mode === 'add') {
+                        // include only if peer is missing or remote timestamp is newer
+                        if (!localPeerInfo || remoteInfo.timestamp > localTimestamp) {
+                            relevantPeers[publicKey] = { ...remoteInfo };
+                        }
+                    }
+
+                    if (mode === 'remove') {
+                        if (localPeerInfo && remoteInfo.timestamp > localTimestamp) {
+                            relevantPeers[publicKey] = { ...remoteInfo };
+                        }
+                    }
+                }
+
+                if (Object.keys(relevantPeers).length > 0) {
+                    // create the file path object if not already exists
+                    if (!diffResult[path]) { diffResult[path] = {}; }
+                    diffResult[path][rootHash] = { peers: relevantPeers };
+                }
+            }
+        }
+
+        return diffResult;
     }
 }
 
 export class SpaceFileManager {
-    constructor(managers) {
-        this.sessionManager = managers.sessionManager;
-        this.storageManager = managers.storageManager;
-        this.socketManager = managers.socketManager;
-        this.messageManager = managers.messageManager;
-        this.spaceFileListManager = managers.spaceFileListManager;
-
-        this.watcher = null;
-        this.activeDownloads = new Map();
-    }
-
-    async init() {
-        const { publicKey } = this.sessionManager.getCredentials();
-        const registryRecords = await this.storageManager.listFileRecords();
-
-        const filesToWatch = [];
-
-        for (const record of registryRecords) {
-
-            // delete all records that are no longer available
-            const exists = await fileExists(record.fileSourcePath);
-            if (!exists) {
-                await this.storageManager.deleteFileRecords(record);
-                continue;
-            }
-
-            const space = await this.storageManager.getSpaceFromFileRecord(record);
-            const topicHash = getSpaceTopicHash(space);
-
-            const spaceFilePath = path.posix.join(record.spacePath, record.spaceFilename);
-            this.spaceFileListManager.addFile({
-                topic: topicHash,
-                spaceFilePath: spaceFilePath,
-                info: {
-                    publicKey: publicKey,
-                    rootHash: record.rootHash
-                }
-            });
-
-            filesToWatch.push(record.fileSourcePath);
-        }
-
-        this.watcher = createWatcher(filesToWatch);
-
-        this.watcher.on(WatchTypes.CHANGE,
-            async filePath => await this.handleLocalFileEvent(filePath, 'change'));
-
-        this.watcher.on(WatchTypes.DELETE,
-            async filePath => await this.handleLocalFileEvent(filePath, 'remove'));
-    }
-
-    async stop() {
-        if (this.watcher) {
-            await this.watcher.close();
-        }
-    }
-
-    async handleLocalFileEvent(filePath, action) {
-        const registryRecords = await this.storageManager.queryFileRegistryRecords({ fileSourcePath: filePath });
-
-        switch (action) {
-            case 'change':
-                for (const record of registryRecords) {
-                    const space = await this.storageManager.getSpaceFromFileRecord(record);
-                    await this.deleteLocalFile(space, { filePath });
-                    await this.addLocalFile(space, {
-                        filePath,
-                        spacePath: record.spacePath,
-                        spaceFilename: record.spaceFilename,
-                    });
-                }
-
-                return;
-
-            case 'remove':
-                for (const record of registryRecords) {
-                    const space = await this.storageManager.getSpaceFromFileRecord(record);
-                    await this.deleteLocalFile(space, { filePath });
-                }
-
-                return;
-        }
-    }
-
-    /**
-     * Handle incoming Stream frames from multiplexer.
-     * @param {Object} socket - Socket connection
-     * @param {Buffer} payload - Stream payload
-     * @param {Object} info - Hyperswarm info object
-     */
-    async handleIncomingStream(socket, payload, info) {
-        // avoid empty streams
-        if (payload.length < 1) return;
-
-        const taskKeyLen = payload[0];
-        // rare condition. should not happen.
-        if (payload.length < 1 + taskKeyLen) return;
-
-        const taskKey = payload.subarray(1, 1 + taskKeyLen).toString();
-        const chunk = payload.subarray(1 + taskKeyLen);
-
-        const download = this.activeDownloads.get(taskKey);
-        if (!download) {
-            console.error(`Received stream from unkown taskKey ${taskKey}`);
-            return;
-        }
-
-        if (chunk.length === 0) {
-            download.writeStream.end();
-            download.resolve();
-            this.activeDownloads.delete(taskKey);
-        }
-
-        else {
-            download.writeStream.write(chunk, (error) => {
-                if (error) {
-                    download.reject(error);
-                    download.writeStream.destroy();
-                    this.activeDownloads.delete(taskKey);
-                }
-            })
-        }
-    }
-
-    async addLocalFile(space, { filePath, spacePath, spaceFilename }) {
-        const exists = await fileExists(filePath);
-        if (!exists) {
-            throw new Error('File does not exists');
-        }
-
-        const { publicKey, secretKey } = this.sessionManager.getCredentials();
-
-        if (!publicKeyIsAllowedToBroadcast(publicKey, space)) {
-            throw new Error('Peer is not allowed to broadcast into this space');
-        }
-
-        const rootHash = await this.storageManager.createFileRecord({
-            space,
-            filePath,
-            spacePath,
-            spaceFilename,
-        });
-
-        const topicHash = getSpaceTopicHash(space);
-        const spaceFilePath = path.posix.join(spacePath, spaceFilename);
-
-        this.spaceFileListManager.addFile({
-            topic: topicHash,
-            spaceFilePath: spaceFilePath,
-            info: { publicKey, rootHash }
-        });
-
-        this.watcher.add(filePath);
-
-        const message = await createSpaceFileAction({
-            topic: topicHash,
-            action: SpaceFileActionOptions.ADD,
-            context: { spaceFilePath, rootHash },
-            publicKey: publicKey,
-            secretKey: secretKey
-        });
-
-        const peers = this.socketManager.getPeerKeys(key => publicKeyIsAllowedToRead(key, space));
-        const sockets = this.socketManager.getConnectedSockets({
-            peers: peers, topics: [topicHash]
-        });
-
-        return await this.messageManager.broadcastMessageToSockets(message, sockets);
-    }
-
-    async deleteLocalFile(space, { filePath }) {
-        // delete registry records from database
-        const records = await this.storageManager.deleteFileRecords(filePath);
-        this.watcher.unwatch(filePath);
-
-        const topicHash = getSpaceTopicHash(space);
-        const { publicKey, secretKey } = this.sessionManager.getCredentials();
-
-        if (!publicKeyIsAllowedToBroadcast(publicKey, space)) {
-            throw new Error('Peer is not allowed to broadcast into this space');
-        }
-
-        // remove from space file hierarchy
-        const broadcastResults = [];
-        for (const record of records) {
-            const { spacePath, spaceFilename, rootHash } = record;
-            const spaceFilePath = path.posix.join(spacePath, spaceFilename);
-
-            this.spaceFileListManager.removeFile({
-                topic: topicHash,
-                spaceFilePath: spaceFilePath,
-                info: { publicKey, rootHash }
-            });
-
-            const message = await createSpaceFileAction({
-                topic: topicHash,
-                action: SpaceFileActionOptions.DELETE,
-                context: { spaceFilePath, rootHash },
-                publicKey: publicKey,
-                secretKey: secretKey
-            });
-
-            const peers = this.socketManager.getPeerKeys(key => publicKeyIsAllowedToRead(key, space));
-            const sockets = this.socketManager.getConnectedSockets({
-                peers: peers, topics: [topicHash]
-            });
-
-            const result = await this.messageManager.broadcastMessageToSockets(message, sockets);
-            broadcastResults.push(result);
-        }
-
-        return broadcastResults;
-    }
-
-    async downloadFromSpace(space, spaceFilePath, rootHash, destination) {
-        const topic = getSpaceTopicHash(space);
-        const fileList = this.spaceFileListManager.getFileList(topic);
-        const variants = fileList[spaceFilePath];
-
-        if (!variants) {
-            throw new Error(`no provider found for ${spaceFilePath}`);
-        }
-
-        const variant = variants.find(v => v.rootHash === rootHash);
-        if (!variant || variant.peers.length === 0) {
-            throw new Error(`No provider found for rootHash ${rootHash}`);
-        }
-
-        const providerPublicKey = variant.peers[0];
-        const sockets = this.socketManager.getConnectedSockets({
-            peers: [providerPublicKey],
-            topics: [topic]
-        });
-
-        if (sockets.length === 0) {
-            throw new Error(`No active connection to provider node [${providerPublicKey}]`);
-        }
-
-        const socket = sockets[0];
-        const taskKey = crypto.randomBytes(16).toString('hex');
-
-        const writeStream = fs.createWriteStream(destination);
-        const downloadPromise = new Promise((resolve, reject) => {
-            this.activeDownloads.set(taskKey, {
-                writeStream,
-                resolve,
-                reject,
-                destination
-            });
-        });
-
-        const { publicKey, secretKey } = this.sessionManager.getCredentials();
-        const message = await createSpaceFileRequest({
-            topic: topic,
-            taskKey: taskKey,
-            rootHash: rootHash,
-            spaceFilePath: spaceFilePath,
-            publicKey: publicKey,
-            secretKey: secretKey
-        });
-
-        await this.messageManager.sendMessageToSocket(message, socket);
-        return downloadPromise;
-    }
+    constructor(emitter, managers) {}
+    async handleIncomingStream(socket, data, info) {}
 }

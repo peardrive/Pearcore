@@ -1,3 +1,62 @@
+// General validation helper functions
+export const notNull = (obj) => obj !== null;
+export const notUndefined = (obj) => obj !== undefined;
+export const isDefined = (obj) => notNull(obj) && notUndefined(obj);
+export const isBoolean = (obj) => typeof obj === 'boolean';
+export const isBinary = (obj) => typeof obj === 'number' && [0, 1].includes(obj);
+export const isBooleanOrBinary = (obj) => isBoolean(obj) || isBinary(obj);
+
+export const isNull = obj => obj === null;
+export const isNullOrHex = obj => isNull(obj) || (isString(obj) && validateHexString(obj));
+export const isString = item => typeof item === 'string';
+export const isNumber = item => typeof item === 'number';
+export const isObject = item => typeof item === 'object';
+export const hasExactLength = (item, length) => item.length === length;
+export const isValidTopic = item => {
+    return isString(item) && containsCharacters(item, 64) && validateHexString(item)
+};
+
+/**
+ * Validates nonce to be 24 character hex string.
+ * @param {string} nonce 
+ * @returns {Boolean}
+ */
+export const nonceIsValid = nonce =>
+    isString(nonce) &&
+    validateHexString(nonce) &&
+    nonce.length === 24;
+
+/**
+ * Validates space secret key to be 64 character hex string.
+ * @param {string} secret 
+ * @returns 
+ */
+export const spaceSecretIsValid = secret =>
+    isString(secret) &&
+    validateHexString(secret) &&
+    secret.length == 64;
+
+/**
+ * Validates if a string contains only hexadecimal characters (0-9, a-f, A-F)
+ * @param {string} str - The string to validate
+ * @returns {boolean} True if string contains only hex characters, false otherwise
+ */
+export function validateHexString(str) {
+    return /^[0-9a-fA-F]+$/.test(str);
+}
+
+/**
+ * Validates space file path string.
+ * @param {string} filepath - space file path
+ * @returns {Boolean}
+ */
+export function validateFilePath(filepath) {
+    if (typeof filepath !== 'string') return false;
+    // Allow: /filename.ext or /dir/subdir/file.ext
+    // Disallow empty, relative, or special chars
+    return /^\/[a-zA-Z0-9_.-]+(\/[a-zA-Z0-9_.-]+)*$/.test(filepath);
+}
+
 /**
  * Returns the current timestamp for message broadcasting.
  *
@@ -19,7 +78,7 @@ export function validateTimestamp(timestamp) {
     return (
         typeof timestamp === 'number' &&
         !isNaN(timestamp) &&
-        isFinite(timestamp) && 
+        isFinite(timestamp) &&
         timestamp >= 0
     );
 }
@@ -49,15 +108,6 @@ export function isTimestampNewer(candidateTs, existingTs) {
 export function isTimestampEqual(candidateTs, existingTs) {
     if (existingTs === null || existingTs === undefined) throw new Error('invalid timestamp');
     return Number(candidateTs) === Number(existingTs);
-}
-
-/**
- * Validates if a string contains only hexadecimal characters (0-9, a-f, A-F)
- * @param {string} str - The string to validate
- * @returns {boolean} True if string contains only hex characters, false otherwise
- */
-export function validateHexString(str) {
-    return /^[0-9a-fA-F]+$/.test(str);
 }
 
 /**
@@ -151,40 +201,40 @@ export function validateBootstrapString(str) {
     if (!str || str === 'undefined') {
         return { valid: true, reason: 'No bootstrap node specified' };
     }
-    
+
     // Regex pattern for IPv4:Port format
     const regex = /^(\d{1,3}\.){3}\d{1,3}:\d+$/;
-    
+
     // Check if string matches the pattern
     if (!regex.test(str)) {
-        return { 
-            valid: false, 
-            reason: 'Invalid format. Expected IPv4:Port (e.g., 192.168.100.23:8000)' 
+        return {
+            valid: false,
+            reason: 'Invalid format. Expected IPv4:Port (e.g., 192.168.100.23:8000)'
         };
     }
-    
+
     // Split and validate IP address ranges
     const [ip, port] = str.split(':');
     const ipParts = ip.split('.').map(Number);
     const portNum = parseInt(port);
-    
+
     // Validate IP octets (0-255 range)
     for (const part of ipParts) {
         if (part < 0 || part > 255) {
-            return { 
-                valid: false, 
-                reason: 'Invalid IP address. Each octet must be between 0 and 255' 
+            return {
+                valid: false,
+                reason: 'Invalid IP address. Each octet must be between 0 and 255'
             };
         }
     }
-    
+
     // Validate port range (1-65535)
     if (portNum < 1 || portNum > 65535) {
-        return { 
-            valid: false, 
-            reason: 'Invalid port number. Must be between 1 and 65535' 
+        return {
+            valid: false,
+            reason: 'Invalid port number. Must be between 1 and 65535'
         };
     }
-    
+
     return { valid: true, ip, port };
 }

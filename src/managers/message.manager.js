@@ -16,7 +16,7 @@ import {
 const logger = createChild('MessageManager');
 
 export class MessageManager {
-    constructor(managers) {
+    constructor(emitter, managers) {
         this.storageManager = managers.storageManager;
         this.sessionManager = managers.sessionManager;
         this.throttleManager = managers.throttleManager;
@@ -24,7 +24,7 @@ export class MessageManager {
         this.muxManager = managers.muxManager;
 
         this.protocolHandlers = new Map();
-        this.emitter = new EventEmitter();
+        this.emitter = emitter;
     }
 
     get messageConfig() {
@@ -33,10 +33,6 @@ export class MessageManager {
 
     get credentials() {
         return this.sessionManager.getCredentials();
-    }
-
-    on(event, callback) {
-        this.emitter.on(event, callback);
     }
 
     setProtocolMap(protocols) {
@@ -184,6 +180,7 @@ export class MessageManager {
                     error: error
                 });
 
+                console.error(error);
                 await this.reject(socket, message, MESSAGES.INTERNAL_ERROR_MESSAGE);
                 return;
             }

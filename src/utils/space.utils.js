@@ -2,7 +2,7 @@ import { eq, inArray, like, gte, lte, and, asc, desc } from 'drizzle-orm';
 import { spaces, broadcastWhitelist, readWhitelist } from "../database/schemas/space.schema.js";
 import { spaceMembers } from "../database/schemas/spaceMembers.schema.js";
 import { userProfiles } from "../database/schemas/profile.schema.js";
-import { now, validateHexString, validateTimestamp } from "./general.utils.js";
+import { isString, now, validateHexString, validateTimestamp } from "./general.utils.js";
 import {
   hex,
   hash,
@@ -12,6 +12,14 @@ import {
   verifySignedJSON,
   generateRandomSecretKey,
 } from "../utils/crypto.utils.js";
+import {
+  notNull,
+  notUndefined,
+  isDefined,
+  isBinary,
+  isBoolean,
+  isBooleanOrBinary
+} from './general.utils.js';
 
 /**
  * Generate a Hyperswarm topic name for a space
@@ -53,6 +61,17 @@ export function getSpaceTopicHash(space) {
   return hex(hash(topic));
 }
 
+function convertPermission(permission) {
+  // undefined parameter or non-binary values should dropped as permission set
+  if (!isDefined(permission) || !isBooleanOrBinary(permission)) 
+  {
+    return 1;
+  }
+
+  // convert boolean to binary if exists
+  return permission ? 1 : 0;
+}
+
 /**
  * Resolve the secret associated with a space based on its read permission.
  *
@@ -61,19 +80,22 @@ export function getSpaceTopicHash(space) {
  * 2. If permissionRead is false and a secret is provided => use it.
  */
 function secretIsRequired(input) {
-  return input.permissionRead ? false : true;
+  return convertPermission(input.permissionRead) ? false : true;
 }
 
 export function buildSpacePayload(source) {
+  const permissionRead = convertPermission(source.permissionRead);
+  const permissionBroadcast = convertPermission(source.permissionBroadcast);
+
   return {
     spaceName: source.spaceName,
     publicKey: source.publicKey,
-    permissionBroadcast: source.permissionBroadcast ? 1 : 0,
-    broadcastWhitelist: !source.permissionBroadcast && Array.isArray(source.broadcastWhitelist)
+    permissionBroadcast: permissionBroadcast,
+    broadcastWhitelist: !permissionBroadcast && Array.isArray(source.broadcastWhitelist)
       ? source.broadcastWhitelist
       : [],
-    permissionRead: source.permissionRead ? 1 : 0,
-    readWhitelist: !source.permissionRead && Array.isArray(source.readWhitelist)
+    permissionRead: permissionRead,
+    readWhitelist: !permissionRead && Array.isArray(source.readWhitelist)
       ? source.readWhitelist
       : [],
     nonce: source.nonce,
@@ -90,38 +112,31 @@ export function buildSpacePayload(source) {
  *         Otherwise, `reason` describes which field failed validation.
  */
 export function validateSpaceContext(space) {
-  const notNull = (obj) => obj !== null;
-  const notUndefined = (obj) => obj !== undefined;
-  const shouldBeDefined = (obj) => notNull(obj) && notUndefined(obj);
-  const shouldBeBoolean = (obj) => typeof obj === 'boolean';
-  const shouldBeBinary = (obj) => typeof obj === 'number' && [0, 1].includes(obj);
-  const BooleanOrBinary = (obj) => shouldBeBoolean(obj) || shouldBeBinary(obj);
-
   const validationRules = [
-    ['spaceName is required', () => shouldBeDefined(space.spaceName)],
-    ['publicKey is required', () => shouldBeDefined(space.publicKey)],
-    ['timestamp is required', () => shouldBeDefined(space.timestamp)],
-    ['signature is required', () => shouldBeDefined(space.signature)],
-    ['nonce is required', () => shouldBeDefined(space.nonce)],
-    ['permissionBroadcast is required', () => shouldBeDefined(space.permissionBroadcast)],
-    ['broadcastWhitelist is required', () => shouldBeDefined(space.broadcastWhitelist)],
-    ['permissionRead is required', () => shouldBeDefined(space.permissionRead)],
-    ['readWhitelist is required', () => shouldBeDefined(space.readWhitelist)],
+    ['spaceName is required', () => isDefined(space.spaceName)],
+    ['publicKey is required', () => isDefined(space.publicKey)],
+    ['timestamp is required', () => isDefined(space.timestamp)],
+    ['signature is required', () => isDefined(space.signature)],
+    ['nonce is required', () => isDefined(space.nonce)],
+    ['permissionBroadcast is required', () => isDefined(space.permissionBroadcast)],
+    ['broadcastWhitelist is required', () => isDefined(space.broadcastWhitelist)],
+    ['permissionRead is required', () => isDefined(space.permissionRead)],
+    ['readWhitelist is required', () => isDefined(space.readWhitelist)],
 
-    ['spaceName should be string', () => typeof space.spaceName === 'string'],
+    ['spaceName should be string', () => isString(space.spaceName)],
     ['spaceName should not a larger that 64 characters', () => space.spaceName.length <= 64],
 
-    ['publicKey should be a string', () => typeof space.publicKey === 'string'],
+    ['publicKey should be a string', () => isString(space.publicKey)],
     ['publicKey should be 64 characters long', () => space.publicKey.length === 64],
     ['publicKey should be a valid hex string', () => validateHexString(space.publicKey)],
 
     ['timestamp should be a valid date', () => validateTimestamp(space.timestamp)],
 
-    ['signature should be a string', () => typeof space.signature === 'string'],
+    ['signature should be a string', () => isString(space.signature)],
     ['signature should be 128 characters long', () => space.signature.length === 128],
     ['signature should be a valid hex string', () => validateHexString(space.signature)],
 
-    ['nonce should be a string', () => typeof space.nonce === 'string'],
+    ['nonce should be a string', () => isString(space.nonce)],
     ['nonce should be 24 characters long', () => space.nonce.length === 24],
     ['nonce should be a valid hex string', () => validateHexString(space.nonce)],
 
@@ -130,14 +145,14 @@ export function validateSpaceContext(space) {
       (typeof space.secret === 'string' && validateHexString(space.secret))
     )],
 
-    ['permissionBroadcast should be boolean or binary', () => BooleanOrBinary(space.permissionBroadcast)],
+    ['permissionBroadcast should be boolean or binary', () => isBooleanOrBinary(space.permissionBroadcast)],
 
     ['broadcastWhitelist should be an array', () => Array.isArray(space.broadcastWhitelist)],
     ['broadcastWhitelist should contain only strings', () => space.broadcastWhitelist.every(pk => typeof pk === 'string')],
     ['in broadcastWhitelist, each publicKey should be 64 character long', () => space.broadcastWhitelist.every(pk => pk.length === 64)],
     ['in broadcastWhitelist, each publicKey should be valid hex string', () => space.broadcastWhitelist.every(pk => validateHexString(pk))],
 
-    ['permissionRead should be boolean or binary', () => BooleanOrBinary(space.permissionRead)],
+    ['permissionRead should be boolean or binary', () => isBooleanOrBinary(space.permissionRead)],
 
     ['readWhitelist should be an array', () => Array.isArray(space.readWhitelist)],
     ['readWhitelist should contain only strings', () => space.readWhitelist.every(pk => typeof pk === 'string')],

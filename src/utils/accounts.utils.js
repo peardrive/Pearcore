@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { ensureDir, fileExists, listSubdirs } from './system.utils.js';
+import { directoryExists, fileExists, listSubdirs } from './system.utils.js';
 import {
   generateMnemonic,
   seedFromMnemonic,
@@ -27,13 +27,23 @@ export function accountBaseDir(username, root) {
 }
 
 /**
- * Path to the .account folder for a user
- * @param {string} username
- * @param {string} [root]
+ * Path to the .account sub-folder for local user.
+ * @param {string} username - Account username.
+ * @param {string} root - Root directory.
  * @returns {string}
  */
 export function accountDotDir(username, root) {
-  return path.join(accountBaseDir(username, root), '.account')
+  return path.join(accountBaseDir(username, root), '.account');
+}
+
+/**
+ * Path to the account's drive directory.
+ * @param {string} username - Account username.
+ * @param {string} root - Root directory
+ * @returns {string}
+ */
+export function accountDriveDir(username, root) {
+  return path.join(accountBaseDir(username, root), 'drive');
 }
 
 /**
@@ -66,14 +76,14 @@ export function accountDotDir(username, root) {
  */
 export async function readAccountMeta(userRoot) {
   try {
-    const metaPath = path.join(userRoot, '.account', 'meta.json')
-    const data = await fs.readFile(metaPath, 'utf-8')
-    const meta = JSON.parse(data)
+    const metaPath = path.join(userRoot, '.account', 'meta.json');
+    const data = await fs.readFile(metaPath, 'utf-8');
+    const meta = JSON.parse(data);
 
-    if (!meta.username || !meta.publicKey) throw new Error('Invalid meta')
-    return meta
+    if (!meta.username || !meta.publicKey) throw new Error('Invalid meta');
+    return meta;
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -87,11 +97,11 @@ export async function readAccountMeta(userRoot) {
  * @returns {Promise<object>} meta (contains publicKey, username, createdAt?)
  */
 export async function ensureAccountExists(username, root) {
-  if (!username || typeof username !== 'string') throw new Error('username required')
-  const userRoot = path.join(root, username)
-  const meta = await readAccountMeta(userRoot)
-  if (!meta) throw new Error(`Account "${username}" not found or meta.json invalid`)
-  return meta
+  if (!username || typeof username !== 'string') throw new Error('username required');
+  const userRoot = path.join(root, username);
+  const meta = await readAccountMeta(userRoot);
+  if (!meta) throw new Error(`Account "${username}" not found or meta.json invalid`);
+  return meta;
 }
 
 /**
@@ -131,24 +141,24 @@ export async function ensureAccountExists(username, root) {
  *   - filesystem operations fail
  */
 export async function listAccountsWithMeta(root) {
-  await ensureDir(root)
+  await directoryExists(root);
 
-  const dirs = await listSubdirs(root)
-  const results = []
+  const dirs = await listSubdirs(root);
+  const results = [];
 
   for (const username of dirs) {
-    const userRoot = path.join(root, username)
-    const meta = await readAccountMeta(userRoot)
+    const userRoot = path.join(root, username);
+    const meta = await readAccountMeta(userRoot);
 
     if (meta) {
       results.push({
         ...meta,
         path: userRoot
-      })
+      });
     }
   }
 
-  return results
+  return results;
 }
 
 
@@ -190,38 +200,38 @@ export async function listAccountsWithMeta(root) {
  * }>}
  */
 export async function createAccount(username, password, root) {
-  username = username.trim().toLowerCase()
-  if (!username) throw new Error('Username required')
+  username = username.trim().toLowerCase();
+  if (!username) throw new Error('Username required');
 
-  await ensureDir(root)
+  await directoryExists(root);
 
-  const dirs = await listSubdirs(root)
-  if (dirs.includes(username)) throw new Error('Account already exists')
+  const dirs = await listSubdirs(root);
+  if (dirs.includes(username)) throw new Error('Account already exists');
 
   // user root folder
-  const userRoot = path.join(root, username)
-  const accountDir = path.join(userRoot, '.account')
-  const driveDir = path.join(userRoot, 'drive')
+  const userRoot = path.join(root, username);
+  const accountDir = path.join(userRoot, '.account');
+  const driveDir = path.join(userRoot, 'drive');
 
-  await ensureDir(accountDir)
-  await ensureDir(driveDir)
+  await directoryExists(accountDir);
+  await directoryExists(driveDir);
 
-  const mnemonic = generateMnemonic()
-  const seed = seedFromMnemonic(mnemonic)
-  const { publicKey, secretKey } = await edKeyPairFromSeed(seed)
+  const mnemonic = generateMnemonic();
+  const seed = seedFromMnemonic(mnemonic);
+  const { publicKey, secretKey } = await edKeyPairFromSeed(seed);
 
-  const salt = await randomSalt()
-  const key = await deriveKeyFromPassword(password, salt)
+  const salt = await randomSalt();
+  const key = await deriveKeyFromPassword(password, salt);
   const credentials = {
     username,
     publicKey: hex(publicKey),
     secretKey: hex(secretKey)
-  }
+  };
 
-  const nonce = randomNonce()
-  const encrypted = await encryptJSON(hex(key), hex(nonce), credentials)
+  const nonce = randomNonce();
+  const encrypted = await encryptJSON(hex(key), hex(nonce), credentials);
 
-  await fs.writeFile(path.join(accountDir, 'credentials.enc.json'), JSON.stringify(encrypted, null, 2))
+  await fs.writeFile(path.join(accountDir, 'credentials.enc.json'), JSON.stringify(encrypted, null, 2));
 
   const meta = {
     username,
@@ -229,15 +239,16 @@ export async function createAccount(username, password, root) {
     nonce: hex(nonce),
     salt: hex(salt),
     createdAt: now()
-  }
-  await fs.writeFile(path.join(accountDir, 'meta.json'), JSON.stringify(meta, null, 2))
+  };
+
+  await fs.writeFile(path.join(accountDir, 'meta.json'), JSON.stringify(meta, null, 2));
 
   return {
     username,
     mnemonic,
     publicKey: hex(publicKey),
     path: userRoot
-  }
+  };
 }
 
 
@@ -284,11 +295,11 @@ export async function authenticateAccount(username, password, root) {
   username = username.trim().toLowerCase();
 
   if (!username) {
-    throw new Error("Username required.")
+    throw new Error("Username required.");
   }
 
   if (!password) {
-    throw new Error("Password required.")
+    throw new Error("Password required.");
   }
 
   const userAccountRoot = path.join(root, username);
@@ -297,7 +308,7 @@ export async function authenticateAccount(username, password, root) {
 
   let metaFileExists = await fileExists(metaFilePath);
   if (!metaFileExists) {
-    throw new Error("Account meta.json file not found.")
+    throw new Error("Account meta.json file not found.");
   }
 
   const meta = JSON.parse(await fs.readFile(metaFilePath, 'utf-8'));
@@ -305,7 +316,7 @@ export async function authenticateAccount(username, password, root) {
     throw new Error("Account metadata is invalid");
   }
 
-  const credentialsPath = path.join(accountDirectory, "credentials.enc.json")
+  const credentialsPath = path.join(accountDirectory, "credentials.enc.json");
 
   let credentialFileExists = await fileExists(credentialsPath);
   if (!credentialFileExists) {
@@ -324,22 +335,22 @@ export async function authenticateAccount(username, password, root) {
 
     // Verify decrypted data matches metadata
     if (decrypted.username !== username) {
-      throw new Error('Username mismatch in credentials')
+      throw new Error('Username mismatch in credentials');
     }
 
     if (decrypted.publicKey !== meta.publicKey) {
-      throw new Error('Public key mismatch')
+      throw new Error('Public key mismatch');
     }
 
     return {
       username: decrypted.username,
       publicKey: decrypted.publicKey,
       secretKey: decrypted.secretKey
-    }
+    };
   } catch (error) {
     if (error.message.includes('invalid tag')) {
-      throw new Error('Invalid password')
+      throw new Error('Invalid password');
     }
-    throw new Error(`Authentication failed: ${error.message}`)
+    throw new Error(`Authentication failed: ${error.message}`);
   }
 }

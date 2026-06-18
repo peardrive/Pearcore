@@ -1,5 +1,5 @@
 export class BaseProtocolHandler {
-    constructor(managers) {
+    constructor(emitter, managers) {
         this.storageManager = managers.storage;
         this.sessionManager = managers.session;
         this.socketManager = managers.socket;
@@ -8,7 +8,7 @@ export class BaseProtocolHandler {
         this.spaceFileManager = managers.spaceFiles;
         this.muxManager = managers.mux;
 
-        this.emitter = this.messageManager.emitter;
+        this.emitter = emitter;
         this.emit = (event, callback) => this.emitter.emit(event, callback);
     }
 

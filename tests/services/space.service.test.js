@@ -72,12 +72,12 @@ describe('spaceService', () => {
                 const shouldResolve = () => primaryMessageReceived && secondaryMessageReceived;
                 setTimeout(() => resolve(), 2000);
 
-                primaryCore.managers.message.on(EVENTS.SpaceHashList, message => {
+                primaryCore.emitter.on(EVENTS.SpaceHashList, message => {
                     secondaryMessageReceived = true;
                     if (shouldResolve()) resolve();
                 })
 
-                secondaryCore.managers.message.on(EVENTS.SpaceHashList, message => {
+                secondaryCore.emitter.on(EVENTS.SpaceHashList, message => {
                     primaryMessageReceived = true;
                     if (shouldResolve()) resolve();
                 })
@@ -102,7 +102,7 @@ describe('spaceService', () => {
             const { publicKey: secondaryPublicKey } = secondaryCore.managers.session.getCredentials();
 
             const messageWaitingPromise = new Promise(resolve => {
-                primaryCore.managers.message.on(EVENTS.SpaceHashList, message => {
+                primaryCore.emitter.on(EVENTS.SpaceHashList, message => {
                     resolve();
                 })
             })
@@ -131,7 +131,7 @@ describe('spaceService', () => {
             const { publicKey: secondaryPublicKey } = secondaryCore.managers.session.getCredentials();
 
             const messageWaitingPromise = new Promise(resolve => {
-                primaryCore.managers.message.on(EVENTS.SpaceHashList, message => {
+                primaryCore.emitter.on(EVENTS.SpaceHashList, message => {
                     resolve();
                 })
             })

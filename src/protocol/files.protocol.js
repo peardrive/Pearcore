@@ -1,121 +1,166 @@
+import * as EVENTS from '../constants/events.constants.js';
 import * as MESSAGES from '../constants/messages.constants.js';
-import { BaseProtocolHandler } from "./base.js";
-import { SpaceFileAction, SpaceFileActionOptions } from '../constants/events.constants.js';
-import { publicKeyIsAllowedToRead } from '../utils/policy.utils.js';
 import { hex } from '../utils/crypto.utils.js';
-import fs, { createReadStream } from 'fs';
-import { FrameTypes } from '../managers/multiplexer.manager.js';
+import { BaseProtocolHandler } from "./base.js";
+import { publicKeyIsAllowedToBroadcast, publicKeyIsAllowedToRead } from '../utils/policy.utils.js';
+import { SpaceFileAction, SpaceFileActionOptions } from '../constants/events.constants.js';
+import {
+    createSpaceFileEventMessage,
+    validateSpaceFileEventPayload,
+    verifySpaceFileEvent,
+    verifySpaceFileRecordSignature
+} from '../utils/protocol.utils.js';
 
-export class SpaceFileActionHandler extends BaseProtocolHandler {
-    async handle(socket, message, info) {
-        try {
-            const { action, context } = message.payload;
-            const record = {
-                topic: message.topic,
-                spaceFilePath: context.spaceFilePath,
-                info: {
-                    publicKey: message.publicKey,
-                    rootHash: context.rootHash
-                }
-            }
 
-            switch (action) {
-                case SpaceFileActionOptions.ADD:
-                    this.spaceFileListManager.addFile(record);
-                    break;
+export class SpaceFileEventHandler extends BaseProtocolHandler {
 
-                case SpaceFileActionOptions.DELETE:
-                    this.spaceFileListManager.removeFile(record);
-                    break;
+    /**
+     * Filter file records by the signatrue.
+     * @param {string} topic - Space topic hash
+     * @param {Array} recordStack - File list stack
+     * @returns {Promise<Array>} Resolves when all signatures has been processed.
+     */
+    async filterVerifiedRecords(topic, recordStack) {
+        const verifiedRecords = [];
 
-                case SpaceFileActionOptions.SYNC:
-                    this.spaceFileListManager.mergeHierarchy(message.topic, context);
-                    break;
+        for (const record of recordStack) {
+            const [path, publicKey, timestamp, rootHash, signature] = record;
 
-                default:
-                    await this.messageManager.reject(socket, message, MESSAGES.INTERNAL_ERROR_MESSAGE);
-                    return;
-            }
-
-            this.emit(SpaceFileAction, message);
-
-            const topicMap = await this.storageManager.generateSpaceTopicHashMap();
-            const messageTopic = message.topic;
-            const space = topicMap[messageTopic];
-
-            if (!space) {
-                await this.messageManager.reject(socket, message, MESSAGES.SPACE_NOT_FOUND_MESSAGE);
-                return;
-            }
-
-            const peers = this.socketManager.getPeerKeys(key => {
-                return publicKeyIsAllowedToRead(key, space) &&
-                    key != message.publicKey &&
-                    key != hex(info.publicKey)
+            const result = await verifySpaceFileRecordSignature({
+                topic,
+                path,
+                publicKey,
+                timestamp,
+                rootHash,
+                signature
             });
 
-            const sockets = this.socketManager.getConnectedSockets({
-                peers: peers, topics: [message.topic]
-            });
-
-            return await this.messageManager.broadcastMessageToSockets(message, sockets);
+            if (result) { verifiedRecords.push(record); }
+            else { console.log('signatrue failed for: ', record) }
         }
 
-        catch (error) { console.error(error) }
+        return verifiedRecords;
+    }
+
+    async handle(socket, message, info) {
+        const topicMap = await this.storageManager.generateSpaceTopicHashMap();
+        const space = topicMap[message.topic];
+
+        if (!space) {
+            await this.messageManager.reject(socket, message, MESSAGES.SPACE_NOT_FOUND_MESSAGE);
+            return;
+        }
+
+        if (!publicKeyIsAllowedToBroadcast(message.publicKey, space)) {
+            await this.messageManager.reject(socket, message, MESSAGES.BROADCAST_PERMISSION_NOT_ALLOWED_MESSAGE);
+            return;
+        }
+
+        const { isValid: payloadIsValid, reason } = validateSpaceFileEventPayload(message);
+
+        if (!payloadIsValid) {
+            await this.messageManager.reject(socket, message, reason);
+            return;
+        }
+
+        const eventStack = [];
+
+        for (const event of message.payload) {
+            const { action, files } = event;
+            const records = await this.filterVerifiedRecords(message.topic, files);
+            const fileList = this.spaceFileListManager.convertStackToList(records);
+
+            const diff = this.spaceFileListManager.diff({
+                topic: message.topic,
+                fileList: fileList,
+                mode: action
+            });
+
+            switch (action) {
+                case EVENTS.SpaceFileEventOptions.ADD:
+
+                    this.spaceFileListManager.merge({
+                        topic: message.topic,
+                        fileList: diff
+                    });
+
+
+                    if (Object.keys(diff).length > 0) {
+                        const broadcastStack = this.spaceFileListManager.convertListToStack(diff);
+                        eventStack.push({ action: action, files: broadcastStack });
+                    }
+
+                    break;
+
+                case EVENTS.SpaceFileEventOptions.REMOVE:
+
+                    diff.forEach(record => {
+                        const [filepath, publicKey, timestamp, rootHash, signature] = record;
+
+                        this.spaceFileListManager.remove({
+                            topic: message.topic,
+                            publicKey: publicKey,
+                            path: filepath
+                        });
+                    });
+
+                    if (Object.keys(diff).length > 0) {
+                        const broadcastStack = this.spaceFileListManager.convertListToStack(diff);
+                        eventStack.push({ action: action, files: broadcastStack });
+                    }
+
+                    break;
+            }
+        }
+
+        // emit the received message before broadcasting the space
+        this.emit(EVENTS.SpaceFileEvent, message);
+
+        if (eventStack.length > 0) {
+            const { publicKey, secretKey } = this.sessionManager.getCredentials();
+
+            const broadcastMessage = await createSpaceFileEventMessage({
+                topic: message.topic,
+                events: eventStack,
+                publicKey: publicKey,
+                secretKey: secretKey,
+            });
+
+            const senderPublicKey = hex(info.publicKey);
+
+            const peers = this.socketManager.getPeerKeys(publicKey => {
+                return publicKeyIsAllowedToRead(publicKey, space) &&
+                    publicKey !== senderPublicKey &&
+                    publicKey !== message.publicKey;
+            });
+            const sockets = this.socketManager.getConnectedSockets({ peers: peers, topics: [message.topic] });
+            await this.messageManager.broadcastMessageToSockets(broadcastMessage, sockets);
+        }
     }
 }
 
-export class SpaceFileRequestHandler extends BaseProtocolHandler {
-    async handle(socket, message, info) {
-        const { taskKey, rootHash, spaceFilePath } = message.payload;
-        const requesterPublicKey = hex(info.publicKey);
 
+export class SpaceFileTreeRequest extends BaseProtocolHandler {
+    async handle(socket, message, topic) {
         const topicMap = await this.storageManager.generateSpaceTopicHashMap();
-        const messageTopic = message.topic;
-        const space = topicMap[messageTopic];
+        const space = topicMap[message.topic];
 
-        if (!publicKeyIsAllowedToRead(requesterPublicKey, space)) {
-            // Optionally send an error JSON message
-            await this.messageManager.reject(socket, message, MESSAGES.READ_PERMISSION_NOT_ALLOWED_MESSAGE);
+        if (!space) {
+            await this.messageManager.reject(socket, message, MESSAGES.SPACE_NOT_FOUND_MESSAGE);
             return;
         }
 
-        const recordQuery = await this.storageManager.queryFileRegistryRecords({ rootHash });
-        if (recordQuery.length < 1) {
-            await this.messageManager.reject(socket, message, 'no file record has been found');
+        if (!publicKeyIsAllowedToRead(message.publicKey, space)) {
+            await this.messageManager.reject(socket, message, MESSAGES.BROADCAST_PERMISSION_NOT_ALLOWED_MESSAGE);
             return;
         }
 
-        const registry = recordQuery[0];
-        const readStream = createReadStream(registry.fileSourcePath);
-        const taskKeyBuf = Buffer.from(taskKey, 'utf8');
-        const taskKeyLen = taskKeyBuf.length;
-        const header = Buffer.allocUnsafe(1 + taskKeyLen);
-        header[0] = taskKeyLen;
-        taskKeyBuf.copy(header, 1);
+        const { isValid: payloadIsValid, reason } = validateSpaceFileTreeRequestPayload(message);
 
+        if (!payloadIsValid) {
+            await this.messageManager.reject(socket, message, reason);
+            return;
+        }
 
-        readStream.on('data', (chunk) => {
-            const framePayload = Buffer.concat([header, chunk]);
-            this.muxManager.send(socket, framePayload, FrameTypes.STREAM).catch(err => {
-                console.error('Error sending STREAM frame:', err);
-                readStream.destroy();
-            });
-        });
-
-        readStream.on('end', () => {
-            // Send zero-length chunk to signal EOF
-            const eofPayload = Buffer.concat([header, Buffer.alloc(0)]);
-            this.muxManager.send(socket, eofPayload, FrameTypes.STREAM).catch(console.error);
-        });
-
-        readStream.on('error', (err) => {
-            console.error(`File read error for rootHash ${rootHash}:`, err);
-            // Optionally send error JSON
-            this.muxManager.send(socket, JSON.stringify({
-                type: 'FILE_REQUEST_ERROR',
-                payload: { taskKey, error: err.message }
-            }), FrameTypes.JSON).catch(console.error);
-        });
     }
 }

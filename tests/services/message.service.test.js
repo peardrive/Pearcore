@@ -39,7 +39,7 @@ describe('MessageService', () => {
         it('message  should reach all allowed nodes', async () => {
             // wait for all nodes to discover the topic except the creator of space
             await factory.condition(async (core, success, failure) => {
-                core.managers.message.on(EVENTS.SpaceSync, () => { success(); })
+                core.emitter.on(EVENTS.SpaceSync, () => { success(); })
                 await core.space.join(goodSpace.sharelink);
             }, { excludeIndices: [0] });
 
@@ -50,7 +50,7 @@ describe('MessageService', () => {
             });
 
             const broadcastResult = await factory.condition(async (core, success, failure) => {
-                core.managers.message.on(EVENTS.SpaceMessage, ({ message, content }) => {
+                core.emitter.on(EVENTS.SpaceMessage, ({ message, content }) => {
                     if (message.publicKey == primaryCore.publicKey) {
                         if (content.data === payload.data) success();
                         else failure();
@@ -74,7 +74,7 @@ describe('MessageService', () => {
             await factory.condition(async (core, success, failure) => {
                 setTimeout(failure, 1000);
                 core.managers.session.setMessageConfig({ allowThrottleRejection: true });
-                core.managers.message.on(EVENTS.SpaceSync, () => { success(); })
+                core.emitter.on(EVENTS.SpaceSync, () => { success(); })
                 await core.space.join(badSpace.sharelink);
             }, { excludeIndices: [1] });
 

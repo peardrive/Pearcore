@@ -8,7 +8,7 @@ import {
 
 
 export class AccountService {
-  constructor({ managers, root }) {
+  constructor(emitter, { managers, root }) {
     this.managers = managers;
     this.root = root;
   }
@@ -34,9 +34,9 @@ export class AccountService {
    * @returns {Promise<Object>} Account metadata
    */
   async create(username, password) {
-    const shouldbeDefined = obj => obj !== undefined && obj !== null;
+    const isDefined = obj => obj !== undefined && obj !== null;
     const shouldBeString = (obj) => typeof obj === 'string';
-    const shouldBeValid = (obj) => shouldbeDefined(obj) &&
+    const shouldBeValid = (obj) => isDefined(obj) &&
       shouldBeString(obj) && obj.length > 0;
 
     if (!shouldBeValid(username)) {
@@ -57,9 +57,9 @@ export class AccountService {
   }
 
   async delete(username) {
-    const shouldbeDefined = obj => obj !== undefined && obj !== null;
+    const isDefined = obj => obj !== undefined && obj !== null;
     const shouldBeString = (obj) => typeof obj === 'string';
-    const shouldBeValid = (obj) => shouldbeDefined(obj) &&
+    const shouldBeValid = (obj) => isDefined(obj) &&
       shouldBeString(obj) && obj.length > 0;
 
     if (!shouldBeValid(username)) {
@@ -77,9 +77,9 @@ export class AccountService {
    * @returns {Promise<Object>} Object containing username, publicKey, and secretKey
    */
   async authenticate(username, password) {
-    const shouldbeDefined = obj => obj !== undefined && obj !== null;
+    const isDefined = obj => obj !== undefined && obj !== null;
     const shouldBeString = (obj) => typeof obj === 'string';
-    const shouldBeValid = (obj) => shouldbeDefined(obj) &&
+    const shouldBeValid = (obj) => isDefined(obj) &&
       shouldBeString(obj) && obj.length > 0;
 
     if (!shouldBeValid(username)) {
@@ -106,7 +106,7 @@ export class AccountService {
     // setup message throttler memory
     await this.managers.throttle.load();
     // load space file lists 
-    await this.managers.spaceFiles.init();
+    //await this.managers.spaceFiles.init();
 
     return {
       username: creds.username,
@@ -128,7 +128,7 @@ export class AccountService {
     this.managers.session.reset();
     this.managers.throttle.clear();
     this.managers.spaceFileList.clear();
-    await this.managers.spaceFiles.stop();
+    //await this.managers.spaceFiles.stop();
   }
 
   /**
@@ -136,15 +136,15 @@ export class AccountService {
    * @returns {Object} State object with username, publicKey and authentication state.
    */
   getCurrentState() {
-    const shouldBeDefined = obj => obj !== undefined && obj !== null;
+    const isDefined = obj => obj !== undefined && obj !== null;
 
     const { db, sqlite } = this.managers.session.getDatabase();
     const { publicKey, secretKey } = this.managers.session.getCredentials();
     const { username } = this.managers.session.getAcccount();
 
     if (
-      shouldBeDefined(db) && shouldBeDefined(sqlite) &&
-      shouldBeDefined(publicKey) && shouldBeDefined(secretKey)
+      isDefined(db) && isDefined(sqlite) &&
+      isDefined(publicKey) && isDefined(secretKey)
     ) {
       return {
         publicKey: publicKey,

@@ -64,7 +64,7 @@ describe('ProfileProtocolHandler', () => {
         primary.manager.throttle.updateByMessage(message);
 
         let eventContext = null;
-        secondary.manager.message.on(EVENTS.ProfileUpdate, ({ message }) => {
+        secondary.manager.emitter.on(EVENTS.ProfileUpdate, ({ message }) => {
             eventContext = message;
         });
 
@@ -105,7 +105,7 @@ describe('ProfileProtocolHandler', () => {
         });
 
         let eventContext = null;
-        primary.manager.message.on(EVENTS.ProfileUpdate, ({ message }) => {
+        primary.manager.emitter.on(EVENTS.ProfileUpdate, ({ message }) => {
             eventContext = message;
         });
 

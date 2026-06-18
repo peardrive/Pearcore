@@ -1,7 +1,7 @@
 import { now } from "../utils/general.utils.js";
 
 export class ThrottleManager {
-    constructor(managers) {
+    constructor(emitter, managers) {
         this.sessionManager = managers.sessionManager;
         this.storageManager = managers.storageManager
 

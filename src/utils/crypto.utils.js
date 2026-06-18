@@ -21,6 +21,16 @@ export function hexToUint8(hexStr) {
 }
 
 /**
+ * Convert hex string to Buffer
+ * @param {string} hexStr
+ * @returns {Buffer}
+ */
+export function hexToBuffer(hexStr) {
+  return Buffer.from(hexStr, 'hex');
+}
+
+
+/**
  * Convert a Uint8Array to hex string.
  * @param {Uint8Array} bytes
  * @returns {string}
@@ -63,7 +73,7 @@ export function canonicalStringify(obj) {
 }
 
 /**
-* Compute SHA-256 hash of a string or Uint8Array using @noble/hashes.
+* Compute BLAKE-3 hash of a string or Uint8Array using @noble/hashes.
 * @param {string|Uint8Array} input
 * @returns {Uint8Array}
 */

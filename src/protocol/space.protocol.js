@@ -5,24 +5,10 @@ import { BaseProtocolHandler } from "./base.js";
 import { getSpaceTopicHash, verifySpaceSignature } from '../utils/space.utils.js';
 import { publicKeyIsAllowedToBroadcast, publicKeyIsAllowedToRead, spaceShouldEncryptMessages } from '../utils/policy.utils.js'
 import { isTimestampEqual, isTimestampNewer, validateHexString } from '../utils/general.utils.js';
-import { createSpaceFileAction, createSpaceSyncMessage, decryptPayload, validateSpaceHashListPayload, validateSpaceSyncMessagePayload } from "../utils/protocol.utils.js";
+import { createSpaceFileAction, createSpaceFileEventMessage, createSpaceSyncMessage, decryptPayload, validateSpaceHashListPayload, validateSpaceSyncMessagePayload } from "../utils/protocol.utils.js";
 
 
 export class SpaceHashListHandler extends BaseProtocolHandler {
-    async sendFileState(socket, topic) {
-        const { publicKey, secretKey } = this.sessionManager.getCredentials();
-        const hierarchy = this.spaceFileListManager.getFileList(topic);
-        const fileSyncMessage = await createSpaceFileAction({
-            topic: topic,
-            action: EVENTS.SpaceFileActionOptions.SYNC,
-            context: hierarchy,
-            publicKey: publicKey,
-            secretKey: secretKey
-        });
-
-        await this.messageManager.sendMessageToSocket(fileSyncMessage, socket);
-    }
-
     async handle(socket, message, info) {
         const senderPublicKey = hex(info.publicKey);
 
@@ -55,7 +41,6 @@ export class SpaceHashListHandler extends BaseProtocolHandler {
                     });
 
                     await this.messageManager.sendMessageToSocket(spaceSyncMessage, socket);
-                    await this.sendFileState(socket, topic);
                 }
             }
         })
@@ -102,18 +87,22 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
         await this.messageManager.broadcastMessageToSockets(message, sockets);
     }
 
-    async sendFileState(socket, topic) {
+    async sendSpaceFileListContextToSocket(socket, topic) {
         const { publicKey, secretKey } = this.sessionManager.getCredentials();
-        const hierarchy = this.spaceFileListManager.getFileList(topic);
-        const fileSyncMessage = await createSpaceFileAction({
+        const fileList = this.spaceFileListManager.get(topic);
+        const fileStack = this.spaceFileListManager.convertListToStack(fileList);
+
+        const message = await createSpaceFileEventMessage({
             topic: topic,
-            action: EVENTS.SpaceFileActionOptions.SYNC,
-            context: hierarchy,
+            events: [{ 
+                action: EVENTS.SpaceFileEventOptions.MERGE, 
+                files: fileStack 
+            }],
             publicKey: publicKey,
             secretKey: secretKey
         });
 
-        await this.messageManager.sendMessageToSocket(fileSyncMessage, socket);
+        await this.messageManager.sendMessageToSocket(message, socket);
     }
 
     async handle(socket, message, info) {
@@ -158,11 +147,11 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
                 // first encouter with space sync - create new space record
                 await this.storageManager.upsertSpace(message.payload);
                 await this.storageManager.deleteShareLink(message.payload);
-                this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.FIRST_ENCOUNTER });
-                await this.sendFileState(socket, spaceTopicHash);
-
+                
                 // broadcast to other nodes - they might also look for first encounter
                 await this.broadcastSpaceSyncMessage(message, info);
+                await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
+                this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.FIRST_ENCOUNTER });
                 return;
             }
             else {
@@ -185,9 +174,9 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
         switch (action) {
             case SpaceSyncHandler.STATES.LOCAL_SPACE_REQUIRE_UPDATE:
                 await this.storageManager.upsertSpace(message.payload);
-                this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.LOCAL_SPACE_REQUIRE_UPDATE });
                 await this.broadcastSpaceSyncMessage(message, info);
-                await this.sendFileState(socket, spaceTopicHash);
+                await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
+                this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.LOCAL_SPACE_REQUIRE_UPDATE });
                 return;
 
             case SpaceSyncHandler.STATES.PEER_REQUIRE_UPDATE:
@@ -199,9 +188,9 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
                         secretKey: this.credentials.secretKey
                     });
 
-                    this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.PEER_REQUIRE_UPDATE });
                     await this.messageManager.sendMessageToSocket(responseMessage, socket);
-                    await this.sendFileState(socket, spaceTopicHash);
+                    await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
+                    this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.PEER_REQUIRE_UPDATE });
                     return;
                 }
 
@@ -211,9 +200,8 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
                 }
 
             case SpaceSyncHandler.STATES.IDENTICAL:
-                // no action is required. spaces are already synced.
+                await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
                 this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.IDENTICAL });
-                await this.sendFileState(socket, spaceTopicHash);
                 return;
         }
     }

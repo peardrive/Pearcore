@@ -3,7 +3,7 @@ import { createChild } from "../logger.js";
 const logger = createChild('SpaceSocketManager');
 
 export class SocketManager {
-    constructor() {
+    constructor(emitter) {
         /**
          * Peer registry.
          *

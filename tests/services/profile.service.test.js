@@ -61,7 +61,7 @@ describe('ProfileService', () => {
 
             // wait for nodes to receive and process profile update
             await factory.condition(async (core, success, failure) => {
-                core.managers.message.on(EVENTS.ProfileUpdate, () => {
+                core.emitter.on(EVENTS.ProfileUpdate, () => {
                     success();
                 })
             }, { excludeIndices: [0] });
@@ -98,7 +98,7 @@ describe('ProfileService', () => {
             await primaryCore.profile.update({ username: newUseraname });
 
             await factory.condition(async (core, success, failure) => {
-                core.managers.message.on(EVENTS.ProfileUpdate, () => {
+                core.emitter.on(EVENTS.ProfileUpdate, () => {
                     success();
                 })
             }, { excludeIndices: [0] });

@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { AccountService } from './services/accounts.service.js';
 import { SpaceService } from './services/space.service.js';
 import { ProfileService } from './services/profile.service.js';
@@ -61,11 +62,12 @@ export async function createCore({
   user = null,
 } = {}) {
 
-  const managers = initializeManagers();
-  const space = new SpaceService({ managers });
-  const messages = new MessageService({ managers });
-  const profile = new ProfileService({ managers });
-  const accounts = new AccountService({ 
+  const emitter = new EventEmitter();
+  const managers = initializeManagers(emitter);
+  const space = new SpaceService(emitter, { managers });
+  const messages = new MessageService(emitter, { managers });
+  const profile = new ProfileService(emitter, { managers });
+  const accounts = new AccountService(emitter, { 
     managers: managers,
     root: rootPath 
   });
@@ -78,6 +80,7 @@ export async function createCore({
   }
 
   return {
+    emitter,
     managers,
     space,
     messages,

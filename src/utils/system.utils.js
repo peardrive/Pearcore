@@ -1,7 +1,36 @@
 import path from "path";
-import fs from 'fs/promises'
+import fs from 'fs/promises';
+import { createReadStream } from "fs";
+import { DEFAULT_CHUNK_SIZE } from "../constants/global.constants.js";
 
-export const pathJoin = (...paths) => path.join(...paths)
+/**
+ * Creates file handler for a given file path.
+ * @param {string} filePath - The file source path.
+ * @returns {Promise<fs.FileHandle>}
+ */
+export async function openFile(filePath) {
+    const handler = await fs.open(filePath, 'r+');
+    return handler;
+}
+
+/**
+ * Close system file handler.
+ * @param {fs.FileHandle} handler 
+ */
+export async function closeFile(handler) {
+    await handler.close();
+}
+
+/**
+ * Creates async read stream.
+ * @param {string} filePath 
+ * @param {number} chunksize 
+ */
+export function createFileStream(filePath, chunksize = DEFAULT_CHUNK_SIZE) {
+    return createReadStream(filePath, { highWaterMark: chunksize });
+}
+
+export const pathJoin = (...paths) => path.join(...paths);
 
 /**
  * Check if a file or directory exists
@@ -38,20 +67,63 @@ export async function readFile(filePath, encoding = 'utf8') {
     }
 }
 
-export async function createDirectory() {
+/**
+ * Get metadata from local file.
+ * @param {string} filePath - Absolute file path.
+ * @returns {Promise<object>}
+ */
+export async function getFileMetadata(filePath) {
+  return await fs.stat(filePath);
+}
 
+/**
+ * Get file size in bytes.
+ * @param {string} filePath - Absolute file path.
+ * @returns {Promise<number>}
+ */
+export async function getFileSize(filePath) {
+  const stat = await getFileMetadata(filePath);
+  return stat.size;
+}
+
+/**
+ * Create empty file locally.
+ * @param {string} filePath - Absolute file path.
+ * @returns {Promise<void>}
+ */
+export async function createEmptyFile(filePath) {
+  await fs.writeFile(filePath, '');
+}
+
+/**
+ * Remove file locally.
+ * @param {string} filePath  - Absolute file path.
+ * @returns {Promise<void>}
+ */
+export async function deleteFile(filePath) {
+  await fs.rm(filePath);
 }
 
 /**
  * Ensure a directory exists, creating it recursively if needed.
- * @param {string} dirPath
+ * @param {string} dirPath - Directory path.
+ * @returns {Promise<boolean>}
  */
-export async function ensureDir(dirPath) {
+export async function directoryExists(dirPath) {
   try {
     await fs.mkdir(dirPath, { recursive: true })
   } catch (err) {
     if (err.code !== 'EEXIST') throw err
   }
+}
+
+/**
+ * Create directory locally.
+ * @param {string} dirPath - Absolute directory path
+ * @returns {Promise<void>}
+ */
+export async function createDirectory(dirPath) {
+  await fs.mkdir(dirPath, { recursive: true });
 }
 
 /**
@@ -66,11 +138,6 @@ export async function listSubdirs(rootPath) {
   } catch {
     return []
   }
-}
-
-export async function getFileSize(filePath) {
-  const stat = await fs.stat(filePath);
-  return stat.size;
 }
 
 /**

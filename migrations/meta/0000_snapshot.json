@@ -1,9 +1,70 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "91830a5d-907c-4f68-b9af-0dbab35bfd9d",
+  "id": "6ea0b1f0-5b23-4592-ada8-8eece752058c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
+    "partial_download_record": {
+      "name": "partial_download_record",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "registry_id": {
+          "name": "registry_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_pushed_leaf": {
+          "name": "last_pushed_leaf",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": -1
+        },
+        "final_destination": {
+          "name": "final_destination",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "partial_download_record_registry_id_unique": {
+          "name": "partial_download_record_registry_id_unique",
+          "columns": [
+            "registry_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "partial_download_record_registry_id_file_registry_id_fk": {
+          "name": "partial_download_record_registry_id_file_registry_id_fk",
+          "tableFrom": "partial_download_record",
+          "tableTo": "file_registry",
+          "columnsFrom": [
+            "registry_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "file_index": {
       "name": "file_index",
       "columns": {
@@ -56,6 +117,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "node_index": {
+          "name": "node_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "leaf_index": {
           "name": "leaf_index",
           "type": "integer",
@@ -65,17 +133,17 @@
         }
       },
       "indexes": {
-        "hash_index": {
-          "name": "hash_index",
+        "level_index": {
+          "name": "level_index",
           "columns": [
-            "hash"
+            "level"
           ],
           "isUnique": false
         },
-        "root_hash_index": {
-          "name": "root_hash_index",
+        "nodeIndex_index": {
+          "name": "nodeIndex_index",
           "columns": [
-            "root_hash"
+            "node_index"
           ],
           "isUnique": false
         }
@@ -96,13 +164,13 @@
         }
       },
       "compositePrimaryKeys": {
-        "file_index_file_registry_id_root_hash_hash_pk": {
+        "file_index_file_registry_id_level_node_index_pk": {
           "columns": [
             "file_registry_id",
-            "root_hash",
-            "hash"
+            "level",
+            "node_index"
           ],
-          "name": "file_index_file_registry_id_root_hash_hash_pk"
+          "name": "file_index_file_registry_id_level_node_index_pk"
         }
       },
       "uniqueConstraints": {},
@@ -158,6 +226,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "meta_hash": {
+          "name": "meta_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "leaf_count": {
