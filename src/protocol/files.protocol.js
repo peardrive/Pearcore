@@ -2,29 +2,39 @@ import * as EVENTS from '../constants/events.constants.js';
 import * as MESSAGES from '../constants/messages.constants.js';
 import { hex } from '../utils/crypto.utils.js';
 import { BaseProtocolHandler } from "./base.js";
+import { parseFilePath } from '../utils/parsers.utils.js';
 import { publicKeyIsAllowedToBroadcast, publicKeyIsAllowedToRead } from '../utils/policy.utils.js';
 import { SpaceFileAction, SpaceFileActionOptions } from '../constants/events.constants.js';
 import {
+    verifySpaceFileEvent,
     createSpaceFileEventMessage,
     validateSpaceFileEventPayload,
-    verifySpaceFileEvent,
-    verifySpaceFileRecordSignature
+    verifySpaceFileRecordSignature,
+    validateSpaceFileTreeRequestPayload,
+    createSpaceFileTreeResponseMessage,
+    validateSpaceFileTreeResponsePayload,
 } from '../utils/protocol.utils.js';
+import { getDownloadRecord, getFileTreeRecord, queryFileRegistryRecords } from '../utils/files.utils.js';
+import { verifyMerkleTree } from '../utils/merkletree.utils.js';
 
 
 export class SpaceFileEventHandler extends BaseProtocolHandler {
 
     /**
-     * Filter file records by the signatrue.
+     * Filter file records by the signatrue and permission.
+     * @param {object} space - The space record
      * @param {string} topic - Space topic hash
      * @param {Array} recordStack - File list stack
      * @returns {Promise<Array>} Resolves when all signatures has been processed.
      */
-    async filterVerifiedRecords(topic, recordStack) {
+    async filterVerifiedRecords(space, topic, recordStack) {
         const verifiedRecords = [];
 
         for (const record of recordStack) {
             const [path, publicKey, timestamp, rootHash, signature] = record;
+
+            // ensure records are authorized
+            if (!publicKeyIsAllowedToBroadcast(publicKey, space)) continue;
 
             const result = await verifySpaceFileRecordSignature({
                 topic,
@@ -36,7 +46,6 @@ export class SpaceFileEventHandler extends BaseProtocolHandler {
             });
 
             if (result) { verifiedRecords.push(record); }
-            else { console.log('signatrue failed for: ', record) }
         }
 
         return verifiedRecords;
@@ -56,6 +65,12 @@ export class SpaceFileEventHandler extends BaseProtocolHandler {
             return;
         }
 
+        const senderPublicKey = hex(info.publicKey);
+        if (!publicKeyIsAllowedToRead(senderPublicKey, space)) {
+            await this.messageManager.reject(socket, message, MESSAGES.READ_PERMISSION_NOT_ALLOWED_MESSAGE);
+            return;
+        }
+
         const { isValid: payloadIsValid, reason } = validateSpaceFileEventPayload(message);
 
         if (!payloadIsValid) {
@@ -67,7 +82,7 @@ export class SpaceFileEventHandler extends BaseProtocolHandler {
 
         for (const event of message.payload) {
             const { action, files } = event;
-            const records = await this.filterVerifiedRecords(message.topic, files);
+            const records = await this.filterVerifiedRecords(space, message.topic, files);
             const fileList = this.spaceFileListManager.convertStackToList(records);
 
             const diff = this.spaceFileListManager.diff({
@@ -75,6 +90,8 @@ export class SpaceFileEventHandler extends BaseProtocolHandler {
                 fileList: fileList,
                 mode: action
             });
+
+            if (Object.keys(diff).length === 0) continue;
 
             switch (action) {
                 case EVENTS.SpaceFileEventOptions.ADD:
@@ -114,7 +131,7 @@ export class SpaceFileEventHandler extends BaseProtocolHandler {
         }
 
         // emit the received message before broadcasting the space
-        this.emit(EVENTS.SpaceFileEvent, message);
+        this.emit(EVENTS.SpaceFileEvent, { info, message });
 
         if (eventStack.length > 0) {
             const { publicKey, secretKey } = this.sessionManager.getCredentials();
@@ -140,8 +157,14 @@ export class SpaceFileEventHandler extends BaseProtocolHandler {
 }
 
 
-export class SpaceFileTreeRequest extends BaseProtocolHandler {
-    async handle(socket, message, topic) {
+export class SpaceFileTreeRequestHandler extends BaseProtocolHandler {
+    async handle(socket, message, info) {
+
+        if (message.publicKey !== hex(info.publicKey)) {
+            await this.messageManager.reject(socket, message, MESSAGES.NO_RELAY_MESSAGE);
+            return;
+        }
+
         const topicMap = await this.storageManager.generateSpaceTopicHashMap();
         const space = topicMap[message.topic];
 
@@ -162,5 +185,83 @@ export class SpaceFileTreeRequest extends BaseProtocolHandler {
             return;
         }
 
+        const { spaceFilePath, rootHash } = message.payload;
+        const parsedSpacePath = parseFilePath(spaceFilePath);
+
+        const registryQuery = await queryFileRegistryRecords(this.db, {
+            rootHash: rootHash,
+            spacePath: parsedSpacePath.dir,
+            spaceFilename: parsedSpacePath.filename,
+        });
+
+        if (registryQuery.length === 0) {
+            await this.messageManager.reject(socket, message, MESSAGES.SPACE_FILE_NOT_FOUND);
+            return;
+        }
+
+        const registry = registryQuery[0];
+        const tree = await getFileTreeRecord(this.db, registry.id);
+
+        let lastRequestableLeaf = 0;
+
+        const downloadRecord = await getDownloadRecord(this.db, registry.id);
+
+        if (downloadRecord) {
+            lastRequestableLeaf = downloadRecord.lastPushedLeaf + 1; // index + 1 
+        }
+        else {
+            lastRequestableLeaf = registry.leafCount;
+        }
+
+        const { publicKey, secretKey } = this.sessionManager.getCredentials();
+        const response = await createSpaceFileTreeResponseMessage({
+            topic: message.topic,
+            tree: tree,
+            lastRequestableLeaf: lastRequestableLeaf,
+            replyNonce: message.nonce,
+            publicKey: publicKey,
+            secretKey: secretKey
+        });
+
+        this.emit(EVENTS.SpaceFileTreeRequest, { info, message });
+        await this.messageManager.sendMessageToSocket(response, socket);
+    }
+}
+
+
+export class SpaceFileTreeResponseHandler extends BaseProtocolHandler {
+    async handle(socket, message, info) {
+        if (message.publicKey !== hex(info.publicKey)) {
+            await this.messageManager.reject(socket, message, MESSAGES.NO_RELAY_MESSAGE);
+            return;
+        }
+
+        const topicMap = await this.storageManager.generateSpaceTopicHashMap();
+        const space = topicMap[message.topic];
+
+        if (!space) {
+            await this.messageManager.reject(socket, message, MESSAGES.SPACE_NOT_FOUND_MESSAGE);
+            return;
+        }
+
+        if (!publicKeyIsAllowedToRead(message.publicKey, space)) {
+            await this.messageManager.reject(socket, message, MESSAGES.BROADCAST_PERMISSION_NOT_ALLOWED_MESSAGE);
+            return;
+        }
+
+        const validationResult = validateSpaceFileTreeResponsePayload(message);
+
+        if (!validationResult.isValid) {
+            await this.messageManager.reject(socket, message, reason);
+            return;
+        }
+
+        const verificationResult = verifyMerkleTree(message.payload.tree);
+        
+        if (!verificationResult.isValid) {
+            await this.messageManager.reject(socket, message, verificationResult.reason);
+        }
+
+        this.emit(EVENTS.SpaceFileTreeResponse, { info, message });
     }
 }

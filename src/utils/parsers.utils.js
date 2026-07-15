@@ -1,3 +1,6 @@
+import path from "node:path"
+import { pathJoin } from "./system.utils.js"
+
 /**
  * Safely parse raw data as JSON.
  * Returns the parsed object if valid JSON, otherwise null.
@@ -69,4 +72,15 @@ export function parseSpaceTopic(topic) {
   if (!spaceName || !publicKey || !nonce) return null;
 
   return { spaceName, publicKey, nonce};
+}
+
+/**
+ * Parse filePath into directory and filename.
+ * @param {string} filePath - The file path.
+ * @returns {{dir: string, filename: string}}
+ */
+export function parseFilePath(filePath) {
+    const normalized = filePath.replace(/\\/g, '/');
+    const parsed = path.parse(normalized);
+    return { dir: parsed.dir || '', filename: parsed.base };
 }

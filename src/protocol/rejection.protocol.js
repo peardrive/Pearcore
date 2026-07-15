@@ -8,10 +8,11 @@ export class RejectionProtocolHandler extends BaseProtocolHandler {
 
         // trigger rejection event to be used within other managers/services.
         this.emit(EVENTS.Reject, {
+            info,
+            message,
             fromPublicKey: publicKey,
             reason: message.payload.reason,
             linkedMessageNonce: message.payload.linkedMessageNonce,
-            message: message
         });
     }
 }

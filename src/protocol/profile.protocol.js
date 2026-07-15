@@ -32,7 +32,7 @@ export class ProfileProtocolHandler extends BaseProtocolHandler {
             await this.storageManager.updateProfile(profile);
         }
 
-        this.emit(EVENTS.ProfileUpdate, { message });
+        this.emit(EVENTS.ProfileUpdate, { info, message });
 
         if (senderPublicKey === message.publicKey) {
             const peers = this.socketManager.getPeerKeys(key => {

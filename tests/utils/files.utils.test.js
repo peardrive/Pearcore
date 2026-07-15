@@ -11,16 +11,18 @@ import { hex, hash } from '../../src/utils/crypto.utils.js';
 import {
     createfileRegistryRecord,
     createDownloadRecord,
-    generateFileTree,
+    generateFileTreeRecord,
     getDownloadRecord,
     getFileChunk,
     getFileMetaHash,
     getFileRegistryRecord,
-    getFileTree,
+    getFileTreeRecord,
     getFileTreeLeafs,
     openFileFromRegistry,
     updateDownloadRecord,
-    setDownloadAsComplete
+    setDownloadAsComplete,
+    getFileMetaHashFromSource,
+    updateFileTreeRecord
 } from '../../src/utils/files.utils.js';
 
 describe('File Utils', () => {
@@ -92,9 +94,9 @@ describe('File Utils', () => {
         });
     });
 
-    describe('generateFileTree', () => {
+    describe('generateFileTreeRecord', () => {
         it('should successfully insert Merkle Tree record of file into database', async () => {
-            const { registryId, fileIndexRecords } = await generateFileTree(db, {
+            const { registryId, fileIndexRecords } = await generateFileTreeRecord(db, {
                 fileSourcePath: filePath,
                 spaceId: spaceId
             });
@@ -124,9 +126,81 @@ describe('File Utils', () => {
         });
     });
 
+    describe('updateFileTreeRecord', async () => {
+        let registryId = null;
+        let oldTree = null;
+        let oldMetaHash = null;
+
+        beforeEach(async () => {
+            const result = await generateFileTreeRecord(db, {
+                fileSourcePath: filePath,
+                spaceId: spaceId
+            });
+
+            registryId = result.registryId;
+
+            oldTree = await getFileTreeRecord(db, registryId);
+            const registery = await getFileRegistryRecord(db, registryId);
+            oldMetaHash = registery.metaHash;
+        });
+
+        it('should update all tree fields and delete old indexes when the file content changes', async () => {
+            const newFilePath = path.join(root, 'newfile.dat');
+            await generateRandomFile(newFilePath, 2); // 2 MB vs original 1 MB
+
+            const stream = createFileStream(newFilePath);
+            const size = await getFileSize(newFilePath);
+            const newTree = await generateMerkleTree({
+                stream,
+                size,
+                chunkSize: DEFAULT_CHUNK_SIZE,
+            });
+            
+            const newMetaHash = await getFileMetaHashFromSource(newFilePath);
+
+            await createDownloadRecord(db, {
+                tempFilePath: path.join(root, 'temp'),
+                finalDestination: path.join(root, 'final'),
+                spaceId: spaceId,
+                spacePath: '/',
+                spaceFilename: 'old.dat',
+                rootHash: oldTree.rootHash,
+                leafCount: oldTree.leafCount,
+                height: oldTree.height,
+            });
+
+            await updateFileTreeRecord(db, {
+                registryId,
+                metaHash: newMetaHash,
+                tree: newTree
+            });
+
+            const updatedRegistry = await getFileRegistryRecord(db, registryId);
+            expect(updatedRegistry.rootHash).toBe(newTree.rootHash);
+            expect(updatedRegistry.metaHash).toBe(newMetaHash);
+            expect(updatedRegistry.height).toBe(newTree.levels.length - 1);
+            expect(updatedRegistry.leafCount).toBe(getLeafCount(size, DEFAULT_CHUNK_SIZE));
+
+            const leafs = await getFileTreeLeafs(db, registryId);
+            expect(leafs.length).toBe(updatedRegistry.leafCount);
+
+            const rootHash = updatedRegistry.rootHash;
+            leafs.forEach((leaf, index) => {
+                expect(leaf.registryId).toBe(registryId);
+                expect(leaf.rootHash).toBe(rootHash);
+                expect(leaf.leafIndex).toBe(index);
+                expect(leaf.nodeIndex).toBe(index);
+                expect(validateHexString(leaf.hash)).toBe(true);
+            });
+
+            const download = await getDownloadRecord(db, registryId);
+            expect(download).not.toBeDefined();
+        });
+    });
+
     describe('getFileFromRegistry', () => {
         it('should return valid file handler', async () => {
-            const { registryId } = await generateFileTree(db, {
+            const { registryId } = await generateFileTreeRecord(db, {
                 fileSourcePath: filePath,
                 spaceId: spaceId
             });
@@ -160,11 +234,11 @@ describe('File Utils', () => {
         });
     });
 
-    describe('getFileTree', () => {
+    describe('getFileTreeRecord', () => {
         let registryId = null;
 
         beforeEach(async () => {
-            const result = await generateFileTree(db, {
+            const result = await generateFileTreeRecord(db, {
                 fileSourcePath: filePath,
                 spaceId: spaceId
             });
@@ -173,7 +247,7 @@ describe('File Utils', () => {
         });
 
         it('should retrieve the Merkle tree and pass validation and verification', async () => {
-            const tree = await getFileTree(db, registryId);
+            const tree = await getFileTreeRecord(db, registryId);
 
             const validationResult = validateMerkleTree(tree);
             expect(validationResult.isValid).toBe(true);
@@ -184,7 +258,7 @@ describe('File Utils', () => {
 
         it('should return null if no records exist for the registryId', async () => {
             const nonExistentId = 999999;
-            const tree = await getFileTree(db, nonExistentId);
+            const tree = await getFileTreeRecord(db, nonExistentId);
             expect(tree).toBeNull();
         });
 
@@ -192,12 +266,12 @@ describe('File Utils', () => {
             const emptyFilePath = path.join(root, 'emptyfile');
             await generateRandomFile(emptyFilePath, 0);
 
-            const result = await generateFileTree(db, {
+            const result = await generateFileTreeRecord(db, {
                 fileSourcePath: emptyFilePath,
                 spaceId: spaceId,
             });
 
-            const tree = await getFileTree(db, result.registryId);
+            const tree = await getFileTreeRecord(db, result.registryId);
             expect(tree).not.toBeNull();
             expect(tree.height).toBe(0);
             expect(tree.leafCount).toBe(1);

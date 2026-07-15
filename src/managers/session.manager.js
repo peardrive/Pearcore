@@ -35,7 +35,7 @@ export class SessionManager {
             messaging: {
                 rawLimitSize: messageConstants.MAX_MESSAGE_SIZE,
                 frequencyThrottle: messageConstants.MAX_FREQUENCY_THROTTLE,
-                maxQuarantineTime: messageConstants.MAX_QUARANTINE_TIME,
+                maxQuarantineTime: messageConstants.MAX_QUARANTINE_TIME, // replace with 1000000
                 allowThrottleRejection: messageConstants.ALLOW_THROTTLE_REJECTIONS,
 
                 // limit the number of messages that are stored per event type to prevent
@@ -44,6 +44,13 @@ export class SessionManager {
                     eventConstants.Message
                 ]
             },
+
+            files: {
+                broadcastThrottleTime: 1000, // 1-second
+                // minimum required leaf count for advertising file availability
+                minLeafCountForAdvertisement: 10,
+                treeRequestInterval: 10000, // 10 seconds
+            }
         }
 
         this.session = this.STATIC_SESSION;
@@ -86,7 +93,7 @@ export class SessionManager {
         this.session.set('credentials.secretKey', secretKey);
     }
 
-    getAcccount() {
+    getAccount() {
         return this.session.get('account');
     }
 

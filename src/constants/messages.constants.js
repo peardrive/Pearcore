@@ -7,7 +7,7 @@ export const ALLOW_THROTTLE_REJECTIONS = false;
 
 // Predefined rejection messages
 export const MESSAGE_RATE_LIMIT_EXCEEDED = 'node is throttled due to excessive message reception';
-export const MESSAGE_IS_DUPLICATED = 'The message has already been processed and is considered duplicated';
+export const MESSAGE_IS_DUPLICATED = 'the message has already been processed and is considered duplicated';
 export const INTERNAL_ERROR_MESSAGE = 'internal error';
 export const EXCEED_SIZE_MESSAGE = 'message exceeds the size limit';
 export const BAD_JSON_MESSAGE = 'failed to parse json';
@@ -21,3 +21,4 @@ export const NOT_SUBSCRIBED_MESSAGE = 'peer is not subscribed for the space';
 export const SPACE_NOT_FOUND_MESSAGE = 'space is not found';
 export const READ_PERMISSION_NOT_ALLOWED_MESSAGE = 'peer is not allowed to read this space';
 export const BROADCAST_PERMISSION_NOT_ALLOWED_MESSAGE = 'peer is not allowed to broadcast in this space';
+export const SPACE_FILE_NOT_FOUND = 'space file registry not found';

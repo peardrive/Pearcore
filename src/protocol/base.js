@@ -16,6 +16,10 @@ export class BaseProtocolHandler {
         return this.sessionManager.getCredentials();
     }
 
+    get db() {
+        return this.sessionManager.getDatabase().db;
+    }
+    
     async handle(socket, message, info) {
         throw new Error("Handle method must be implemented by subclass");
     }

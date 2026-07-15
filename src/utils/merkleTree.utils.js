@@ -1,3 +1,4 @@
+import { DEFAULT_CHUNK_SIZE } from "../constants/global.constants.js";
 import { hash, hex, hexToBuffer } from "./crypto.utils.js";
 import {
     isNull,
@@ -27,13 +28,13 @@ export const getLeafCount = (fileSize, chunkSize) => fileSize === 0 ? 1 : Math.c
  * @returns {Promise<{
  *   levels: Array,
  *   height: number,
- *   rootHash: Buffer
+ *   rootHash: String
  * }>}
  */
 export async function generateMerkleTree({
     stream,
     size,
-    chunkSize
+    chunkSize = DEFAULT_CHUNK_SIZE
 }) {
     if (!isDefined(size) || !isNumber(size) || size < 0) {
         throw new Error("file size is invalid for merkle tree");
@@ -187,7 +188,6 @@ export function validateMerkleNode(node) {
  * @param {Object} tree - The tree object.
  * @param {Array<Array<Object>>} tree.levels - Array of levels, each level is an array of node objects.
  * @param {number} tree.height - The height of the tree (root level = 0, leaf level = height).
- * @param {number} tree.leafCount - Number of leaves.
  * @param {string} tree.rootHash - The claimed root hash in hex string.
  * @returns {{isValid: boolean, reason: string}} - True if the tree is valid, false otherwise.
  */

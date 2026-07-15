@@ -1,14 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import * as EVENTS from '../../src/constants/events.constants.js'
-import * as cryptoUtils from '../../src/utils/crypto.utils.js'
-import * as protocolUtils from '../../src/utils/protocol.utils.js'
-import { generateSpaceSecret } from '../../src/utils/space.utils.js'
-import { buildTestProfilePayload, generateKeypair } from '../general.utils.js'
+import { describe, it, expect, beforeEach } from 'vitest';
+import * as EVENTS from '../../src/constants/events.constants.js';
+import * as cryptoUtils from '../../src/utils/crypto.utils.js';
+import * as protocolUtils from '../../src/utils/protocol.utils.js';
+import { generateSpaceSecret } from '../../src/utils/space.utils.js';
+import { buildTestProfilePayload, generateKeypair } from '../general.utils.js';
+import { generateMerkleTree } from '../../src/utils/merkletree.utils.js';
+import { Readable } from 'stream';
 
 const { hex } = cryptoUtils;
 
 describe('Protocol Messages', () => {
-    let secretKey, publicKey
+    let secretKey, publicKey;
 
     beforeEach(async () => {
         const keys = await generateKeypair();
@@ -795,5 +797,116 @@ describe('Protocol Messages', () => {
 
             expect(result).toBe(true);
         });
+    });
+
+    describe('validateSpaceFileTreeRequestPayload', () => {
+        const validSpacePath = '/root/movie.mp4';
+        const validRootHash = 'a'.repeat(32);
+
+        it('should return true for valid payload', async () => {
+            const message = await protocolUtils.createSpaceFileTreeRequestMessage({
+                topic: 'some-space-topic',
+                rootHash: 'a'.repeat('64'),
+                spaceFilePath: validSpacePath,
+                publicKey: publicKey,
+                secretKey: secretKey
+            });
+
+            const result = protocolUtils.validateSpaceFileTreeRequestPayload(message);
+            expect(result.isValid).toBe(true);
+        });
+
+        it('should return false for invalid rootHash', async () => {
+            const invalidPayloads = [
+                { rootHash: 123, spaceFilePath: validSpacePath }, // not string
+                { rootHash: 'zz'.repeat(32), spaceFilePath: validSpacePath }, // invalid hex
+                { rootHash: '', spaceFilePath: validSpacePath } // empty string (invalid hex)
+            ];
+
+            for (const payload of invalidPayloads) {
+                const message = {
+                    topic: 'space-topic',
+                    payload: {
+                        rootHash: payload.rootHash,
+                        spaceFilePath: payload.spaceFilePath,
+                    },
+                    publicKey,
+                    secretKey
+                };
+
+                const status = protocolUtils.validateSpaceFileTreeRequestPayload(message);
+                expect(status.isValid).toBe(false);
+                expect(status.reason).toMatch(/rootHash/i);
+            }
+        });
+
+        it('should return false for invalid spaceFilePath', async () => {
+            const invalidPayloads = [
+                { rootHash: validRootHash, spaceFilePath: undefined }, // missing
+                { rootHash: validRootHash, spaceFilePath: ['root'] }, // not string
+                { rootHash: validRootHash, spaceFilePath: '/root/../movie' }, // path traversal '..'
+                { rootHash: validRootHash, spaceFilePath: '/root/./movie' }, // path traversal '.'
+                { rootHash: validRootHash, spaceFilePath: '../secret' } // leading '..'
+            ];
+
+            for (const payload of invalidPayloads) {
+                const message = {
+                    topic: 'space-topic',
+                    payload: {
+                        rootHash: payload.rootHash,
+                        spaceFilePath: payload.spaceFilePath,
+                    },
+                    publicKey,
+                    secretKey
+                };
+
+                const status = protocolUtils.validateSpaceFileTreeRequestPayload(message);
+                
+                expect(status.isValid).toBe(false);
+                expect(status.reason).toMatch(/spaceFilePath/i);
+            }
+        });
+    });
+
+    describe('validateSpaceFileTreeResponsePayload', () => {
+        let tree = null;
+        beforeEach(async () => {
+            const block = c => Buffer.alloc(1024, c);
+            const chunks = [ block('a'), block('b'), block('c') ];
+
+            tree = await generateMerkleTree({
+                stream: Readable.from(chunks),
+                size: chunks.length * 1024,
+                chunkSize: 1024
+            });
+        });
+
+        it('should return true for valid payload', async () => {
+            const message = await protocolUtils.createSpaceFileTreeResponseMessage({
+                topic: 'space-topic',
+                tree: tree,
+                lastRequestableLeaf: 10,
+                replyNonce: 'a'.repeat(24),
+                publicKey: publicKey,
+                secretKey: secretKey,
+            });
+
+            const status = protocolUtils.validateSpaceFileTreeResponsePayload(message);
+            expect(status.isValid).toBe(true);
+        });
+    });
+
+    it('should return false when tree is invalid', () => {
+        const payloads = [
+            { lastRequestableLeaf: 1, replyNonce: 'a'.repeat(24), tree: undefined },
+            { lastRequestableLeaf: 1, replyNonce: 'a'.repeat(24), tree: { bad: 'format' } },
+        ];
+
+        for (const payload of payloads) {
+            const message = { payload: payload };
+            const status = protocolUtils.validateSpaceFileTreeResponsePayload(message);
+
+            expect(status.isValid).toBe(false);
+        }
     });
 })

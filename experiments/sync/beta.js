@@ -144,6 +144,13 @@ async function main() {
 
     // Join the space
     const space = await core.space.join(sharelink);
+
+    await core.space.send(spaceContext, "hello world");
+
+    // core.profile.list()
+    // core.profile.get(publicKey)
+    // core.profile.creat()
+
     console.log(`Joined space: ${space.spaceName || 'unknown'}`);
 
     console.log(`Download‑only client running. Waiting for file announcements. Press Ctrl+C to stop.`);

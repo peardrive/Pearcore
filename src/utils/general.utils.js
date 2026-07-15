@@ -27,6 +27,16 @@ export const nonceIsValid = nonce =>
     nonce.length === 24;
 
 /**
+ * Validates space topic hash.
+ * @param {string} topic 
+ * @returns 
+ */
+export const topicIsValid = topic =>
+    isString(topic) &&
+    validateHexString(topic) &&
+    topic.length === 64;
+
+/**
  * Validates space secret key to be 64 character hex string.
  * @param {string} secret 
  * @returns 

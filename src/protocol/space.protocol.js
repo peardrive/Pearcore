@@ -45,7 +45,7 @@ export class SpaceHashListHandler extends BaseProtocolHandler {
             }
         })
 
-        this.emit(EVENTS.SpaceHashList, { message: message });
+        this.emit(EVENTS.SpaceHashList, { info, message, topics: topicList });
     }
 }
 
@@ -94,9 +94,9 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
 
         const message = await createSpaceFileEventMessage({
             topic: topic,
-            events: [{ 
-                action: EVENTS.SpaceFileEventOptions.MERGE, 
-                files: fileStack 
+            events: [{
+                action: EVENTS.SpaceFileEventOptions.MERGE,
+                files: fileStack
             }],
             publicKey: publicKey,
             secretKey: secretKey
@@ -140,6 +140,7 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
             nonce: message.payload.nonce,
         });
 
+        const messageIsDirect = message.publicKey === hex(info.publicKey);
         const isEmpty = (arr) => arr.length === 0;
 
         if (!isEmpty(sharelinkQuery)) {
@@ -147,11 +148,16 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
                 // first encouter with space sync - create new space record
                 await this.storageManager.upsertSpace(message.payload);
                 await this.storageManager.deleteShareLink(message.payload);
-                
+
                 // broadcast to other nodes - they might also look for first encounter
+                this.emit(EVENTS.SpaceSync, { info, message, action: SpaceSyncHandler.STATES.FIRST_ENCOUNTER });
+
                 await this.broadcastSpaceSyncMessage(message, info);
-                await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
-                this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.FIRST_ENCOUNTER });
+
+                if (messageIsDirect) {
+                    await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
+                }
+
                 return;
             }
             else {
@@ -174,9 +180,14 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
         switch (action) {
             case SpaceSyncHandler.STATES.LOCAL_SPACE_REQUIRE_UPDATE:
                 await this.storageManager.upsertSpace(message.payload);
+                this.emit(EVENTS.SpaceSync, { info, message, action: SpaceSyncHandler.STATES.LOCAL_SPACE_REQUIRE_UPDATE });
+
                 await this.broadcastSpaceSyncMessage(message, info);
-                await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
-                this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.LOCAL_SPACE_REQUIRE_UPDATE });
+
+                if (messageIsDirect) {
+                    await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
+                }
+
                 return;
 
             case SpaceSyncHandler.STATES.PEER_REQUIRE_UPDATE:
@@ -188,9 +199,13 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
                         secretKey: this.credentials.secretKey
                     });
 
+                    this.emit(EVENTS.SpaceSync, { info, message, action: SpaceSyncHandler.STATES.PEER_REQUIRE_UPDATE });
                     await this.messageManager.sendMessageToSocket(responseMessage, socket);
-                    await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
-                    this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.PEER_REQUIRE_UPDATE });
+
+                    if (messageIsDirect) {
+                        await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
+                    }
+
                     return;
                 }
 
@@ -200,8 +215,12 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
                 }
 
             case SpaceSyncHandler.STATES.IDENTICAL:
-                await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
-                this.emit(EVENTS.SpaceSync, { message, action: SpaceSyncHandler.STATES.IDENTICAL });
+                this.emit(EVENTS.SpaceSync, { info, message, action: SpaceSyncHandler.STATES.IDENTICAL });
+                
+                if (messageIsDirect) {
+                    await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
+                }
+                
                 return;
         }
     }
@@ -242,16 +261,10 @@ export class SpaceMessageHandler extends BaseProtocolHandler {
                 nonce: message.nonce
             });
 
-            this.emit(EVENTS.SpaceMessage, {
-                message: message,
-                content: decryptedPayload
-            });
+            this.emit(EVENTS.SpaceMessage, { info, message, content: decryptedPayload });
         }
         else {
-            this.emit(EVENTS.SpaceMessage, {
-                message: message,
-                content: message.payload
-            });
+            this.emit(EVENTS.SpaceMessage, { info, message, content: message.payload });
         }
 
         const peers = this.socketManager.getPeerKeys(publicKey => {

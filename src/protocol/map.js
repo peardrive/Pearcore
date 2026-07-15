@@ -1,8 +1,16 @@
 import * as EVENTS from '../constants/events.constants.js';
-import { SpaceFileEventHandler } from './files.protocol.js';
 import { ProfileProtocolHandler } from './profile.protocol.js';
 import { RejectionProtocolHandler } from './rejection.protocol.js';
-import { SpaceHashListHandler, SpaceMessageHandler, SpaceSyncHandler } from './space.protocol.js';
+import {
+    SpaceHashListHandler,
+    SpaceMessageHandler,
+    SpaceSyncHandler
+} from './space.protocol.js';
+import {
+    SpaceFileEventHandler,
+    SpaceFileTreeRequestHandler,
+    SpaceFileTreeResponseHandler
+} from './files.protocol.js';
 
 export const ProtocolMapFactory = (emitter, managers) => [
     {
@@ -29,4 +37,12 @@ export const ProtocolMapFactory = (emitter, managers) => [
         type: EVENTS.SpaceFileEvent,
         handler: new SpaceFileEventHandler(emitter, managers)
     },
+    {
+        type: EVENTS.SpaceFileTreeRequest,
+        handler: new SpaceFileTreeRequestHandler(emitter, managers)
+    },
+    {
+        type: EVENTS.SpaceFileTreeResponse,
+        handler: new SpaceFileTreeResponseHandler(emitter, managers)
+    }
 ];

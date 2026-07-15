@@ -20,11 +20,6 @@ export class CoreFactory {
     }
 
     async cleanup() {
-        if (this.bootstrapperInstance) {
-            await this.bootstrapperInstance.bootstrapperNode.destroy();
-            await this.bootstrapperInstance.persistentNode.destroy();
-        }
-
         for (const core of this.cores) {
             try {
                 await core.accounts.logout();
@@ -39,6 +34,11 @@ export class CoreFactory {
         }
 
         this.cores = [];
+
+        if (this.bootstrapperInstance) {
+            await this.bootstrapperInstance.bootstrapperNode.destroy();
+            await this.bootstrapperInstance.persistentNode.destroy();
+        }
     }
 
     async createCore(username = 'test user') {

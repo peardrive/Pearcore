@@ -2,16 +2,54 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
 import chokidar from 'chokidar';
-import { eq, and, asc, isNotNull } from 'drizzle-orm';
-import { isNumber, now } from './general.utils.js';
-import { DEFAULT_CHUNK_SIZE } from '../constants/global.constants.js';
-import { downloadRecord, fileIndex, fileRegistry } from '../database/schemas/file.schema.js';
-import { hex, hash, canonicalStringify } from './crypto.utils.js';
-import { createDirectory, createEmptyFile, fileExists, getFileMetadata, getFileSize } from './system.utils.js';
-import { generateMerkleTree, getLeafCount } from './merkletree.utils.js';
 import { getSpace } from './space.utils.js';
+import { eq, and, asc, isNotNull } from 'drizzle-orm';
 import { notNull, notUndefined } from './general.utils.js';
-import { createFileStream, openFile, closeFile } from './system.utils.js';
+import { hex, hash, canonicalStringify } from './crypto.utils.js';
+import { DEFAULT_CHUNK_SIZE } from '../constants/global.constants.js';
+import { isDefined, isNumber, isString, now } from './general.utils.js';
+import { generateMerkleTree, getLeafCount } from './merkletree.utils.js';
+import { downloadRecord, fileIndex, fileRegistry } from '../database/schemas/file.schema.js';
+import {
+    createDirectory,
+    createEmptyFile,
+    createFileStreamFromHandler,
+    deleteFile,
+    fileExists,
+    getFileSize,
+    openFile,
+    closeFile,
+    createFileStream
+} from './system.utils.js';
+import { accountDriveDir } from './accounts.utils.js';
+import { parseFilePath } from './parsers.utils.js';
+
+/**
+ * Generates a local temporary directory path for a space file.
+ * @param {Object} params - The parameters object.
+ * @param {string} params.root - The root directory or mount point for the user's drive.
+ * @param {string} params.username - The username of the account.
+ * @param {string} params.topic - The topic/subdirectory name under the user's drive.
+ * @param {string} params.spaceFilePath - A POSIX-style file path within the space
+ *   (e.g., `"docs/report.pdf"`). This will be parsed to extract its directory part.
+ * @param {string} params.rootHash - The Merkle tree root hash used to create a
+ *   unique subdirectory, preventing conflicts between different file versions.
+ *
+ * @returns {string} The absolute local directory path where temporary source files
+ *   for the given space file should be placed. The structure is:
+ *   `<driveDir>/<topic>/<rootHash>/<spaceFileDir>`.
+ */
+export function getTemporarySourcePathForSpaceFile({root, username, topic, spaceFilePath, rootHash}) {
+    if (!root || !username || !topic || !spaceFilePath || !rootHash) {
+        throw new Error("Invalid parameters for getLocalPathForSpaceFile()");
+    }
+
+    const driveDirectory = accountDriveDir(username, root);
+    const spaceDirectory = path.join(driveDirectory, topic);
+    const parsed = parseFilePath(spaceFilePath);
+
+    return path.join(spaceDirectory, rootHash, parsed.filename);
+}
 
 //mapping chokidar library events
 export const WatchTypes = {
@@ -49,6 +87,19 @@ export async function getFileMetaHash(handler) {
 }
 
 /**
+ * Computes deterministic hash from file metadata
+ * @param {string} filePath - The file path
+ * @returns {Promise<string>} - Hash as hex string.
+ */
+export async function getFileMetaHashFromSource(filePath) {
+    const handler = await openFile(filePath);
+    const metaHash = await getFileMetaHash(handler);
+
+    await closeFile(handler);
+    return metaHash;
+}
+
+/**
  * Create space directory from the file source path.
  * @param {string} source - file source path.
  * @returns {string} returns the generated space path.
@@ -73,6 +124,24 @@ export const getSpacePathFromSource = source => {
 export const getSpaceFilenameFromSource = source => {
     return path.basename(source);
 };
+
+/**
+ * Validates space file path.
+ * @param {string} spaceFilePath - The file path within the space.
+ * @returns {{isValid: boolean, reason: string}}
+ */
+export function validateSpaceFilePath(spaceFilePath) {
+    if (!isDefined(spaceFilePath) || !isString(spaceFilePath)) {
+        return { isValid: false, reason: 'spaceFilePath is required to be string' };
+    }
+
+    const segments = spaceFilePath.split('/').filter(seg => seg !== '');
+    if (segments.some(seg => seg === '..' || seg === '.')) {
+        return { isValid: false, reason: 'spaceFilePath path traversal (./ or ../) is not allowed' };
+    }
+
+    return { isValid: true, reason: 'spaceFilePath is valid' };
+}
 
 /**
  * Builds a normalized payload object for inserting or updating a file registry record.
@@ -126,13 +195,13 @@ export async function createfileRegistryRecord(db, params) {
 /**
  * Get a single file regitry record by ID.
  * @param {Object} db - Database instance.
- * @param {number} registeryId - ID of the file registry.
+ * @param {number} registryId - ID of the file registry.
  * @returns {Promise<Object>}
  */
-export async function getFileRegistryRecord(db, registeryId) {
+export async function getFileRegistryRecord(db, registryId) {
     return await db.select()
         .from(fileRegistry)
-        .where(eq(fileRegistry.id, registeryId))
+        .where(eq(fileRegistry.id, registryId))
         .get();
 }
 
@@ -143,8 +212,8 @@ export async function getFileRegistryRecord(db, registeryId) {
  * @param {string} filters.fileSourcePath - Original file path on the device.
  * @param {number} filters.timestamp - Unix timestamp when the registry was created.
  * @param {number} filters.spaceId - Foreign key referencing the space.
- * @param {string} filters.spacePath - Artificial directory path within the space.
- * @param {string} filters.spaceFilename - Artificial filename within the space.
+ * @param {string} filters.spacePath - Virtual directory path within the space.
+ * @param {string} filters.spaceFilename - Virtual filename within the space.
  * @param {string} filters.rootHash - Root hash of the Merkle tree (optional).
  * @param {string} filters.metaHash - The file metadata hash.
  * @param {number} filters.leafCount - Total number of leaf nodes in the Merkle tree.
@@ -220,7 +289,7 @@ export async function queryFileRegistryRecords(db, filters) {
 /**
  * Update a single file registry record by ID.
  * @param {object} db - Database instance.
- * @param {number} registeryId - ID of the file registry.
+ * @param {number} registryId - ID of the file registry.
  * @param {Object} params - Input paylod.
  * @param {string} params.fileSourcePath - File source path.
  * @param {number} params.timestamp - Timestamp of the file registry.
@@ -233,14 +302,14 @@ export async function queryFileRegistryRecords(db, filters) {
  * @param {number} params.height - Depth value of the merkle tree.
  * @returns {Promise<void>} - Resolves when the record updated in the database.
  */
-export async function updateFileRegistryRecord(db, registeryId, params) {
+export async function updateFileRegistryRecord(db, registryId, params) {
     const payload = buildfileRegistryPayload(params);
     const result = await db.update(fileRegistry)
         .set(payload)
-        .where(eq(fileRegistry.id, registeryId));
+        .where(eq(fileRegistry.id, registryId));
 
     if (result.rowsAffected === 0) {
-        throw new Error(`File registry ${registeryId} does not exist`);
+        throw new Error(`File registry ${registryId} does not exist`);
     }
 }
 
@@ -305,9 +374,7 @@ export async function createFileIndexRecord(db, registryId, tree) {
     const rows = [];
 
     for (const level of tree.levels) {
-        if (!level) {
-            continue;
-        }
+        if (!level) continue;
 
         for (const node of level) {
             rows.push({
@@ -316,10 +383,10 @@ export async function createFileIndexRecord(db, registryId, tree) {
                 level: node.level,
                 nodeIndex: node.nodeIndex,
                 hash: node.hash,
-                parentHash: node.parentHash,
-                leftChildHash: node.leftChildHash,
-                rightChildHash: node.rightChildHash,
-                leafIndex: node.leafIndex,
+                parentHash: node.parentHash ?? null,
+                leftChildHash: node.leftChildHash ?? null,
+                rightChildHash: node.rightChildHash ?? null,
+                leafIndex: node.leafIndex ?? null,
             });
         }
     }
@@ -327,6 +394,18 @@ export async function createFileIndexRecord(db, registryId, tree) {
     if (rows.length > 0) {
         await db.insert(fileIndex).values(rows);
     }
+}
+
+/**
+ * Deletes file registry with all related indexing records from database.
+ * @param {Object} db - Database instace.
+ * @param {number} registryId - ID of the file registry record.
+ * @returns {Promise<void>}
+ */
+export async function deleteFileRecord(db, registryId) {
+    await db.delete(fileIndex).where(eq(fileIndex.registryId, registryId));
+    await db.delete(downloadRecord).where(eq(downloadRecord.registryId, registryId));
+    await db.delete(fileRegistry).where(eq(fileRegistry.id, registryId));
 }
 
 /**
@@ -409,7 +488,7 @@ export async function getFileChunk(handler, fileSize, leafIndex, chunkSize = DEF
  * @param {number} params.spaceId - ID of space for reference.
  * @returns {Promise<{registryId: number, rootHash: string, nodeCount: number}>} Resolves when the file indexing has been complete.
  */
-export async function generateFileTree(db, params) {
+export async function generateFileTreeRecord(db, params) {
     const {
         fileSourcePath,
         spacePath,
@@ -434,10 +513,8 @@ export async function generateFileTree(db, params) {
     });
 
     const rootHash = tree.rootHash;
-    const handler = await openFile(source);
-    const metaHash = await getFileMetaHash(handler);
 
-    await closeFile(handler);
+    const metaHash = await getFileMetaHashFromSource(source);
 
     const { registryId } = await createfileRegistryRecord(db, {
         fileSourcePath: source,
@@ -450,12 +527,44 @@ export async function generateFileTree(db, params) {
         metaHash
     });
 
-    const rows = await createFileIndexRecord(db, registryId, tree);
+    await createFileIndexRecord(db, registryId, tree);
 
     return {
         registryId,
         rootHash,
     };
+}
+
+/**
+ * Updates an existing file registry record with a new Merkle tree and metadata hash.
+ * @param {Object} db - Drizzle database instance.
+ * @param {Object} params - Update parameters.
+ * @param {number} params.registryId - The unique identifier of the file registry record to update.
+ * @param {string} params.metaHash - The new metadata hash (e.g., from the updated file).
+ * @param {Object} params.tree - The new Merkle tree object.
+ * @returns {Promise<void>}
+ */
+export async function updateFileTreeRecord(db, params) {
+    const { registryId, metaHash, tree } = params;
+
+    const registry = await getFileRegistryRecord(db, registryId);
+    if (!registry) {
+        throw new Error("Registry record does not exists");
+    }
+
+    await db.delete(fileIndex).where(eq(fileIndex.registryId, registryId));
+    await db.delete(downloadRecord).where(eq(downloadRecord.registryId, registryId));
+
+    const height = tree.levels.length - 1;
+    await updateFileRegistryRecord(db, registryId, {
+        ...registry,
+        metaHash: metaHash,
+        rootHash: tree.rootHash,
+        height: height,
+        leafCount: tree.levels[height].length 
+    });
+
+    await createFileIndexRecord(db, registryId, tree);
 }
 
 /**
@@ -469,7 +578,7 @@ export async function generateFileTree(db, params) {
  *   rootHash: Buffer
  * }>}
  */
-export async function getFileTree(db, registryId) {
+export async function getFileTreeRecord(db, registryId) {
     const rows = await db.select().from(fileIndex)
         .where(eq(fileIndex.registryId, registryId));
 
@@ -517,18 +626,6 @@ export async function getFileTree(db, registryId) {
 }
 
 /**
- * Deletes file registry with all related indexing records from database.
- * @param {Object} db - Database instace.
- * @param {number} registryId - ID of the file registry record.
- * @returns {Promise<void>}
- */
-export async function deleteFileRecord(db, registryId) {
-    await db.delete(fileRegistry).where(eq(fileRegistry.id, registryId));
-    await db.delete(fileIndex).where(eq(fileIndex.registryId, registryId));
-    await db.delete(downloadRecord).where(eq(downloadRecord.registryId, registryId));
-}
-
-/**
  * Creates a partial download record in database.
  * @param {Object} db - Drizzle database instance.
  * @param {Object} params 
@@ -558,10 +655,7 @@ export async function createDownloadRecord(db, params) {
     await createDirectory(path.dirname(tempFilePath));
     await createEmptyFile(tempFilePath);
 
-    const handler = await openFile(tempFilePath);
-    const metaHash = await getFileMetaHash(handler);
-
-    await closeFile(handler);
+    const metaHash = await getFileMetaHashFromSource(tempFilePath);
 
     const { registryId } = await createfileRegistryRecord(db, {
         fileSourcePath: tempFilePath,
@@ -602,16 +696,16 @@ export async function getDownloadRecord(db, registryId) {
 /**
  * Finishes a completed download by moving the file to its final destination.
  * @param {Object} db - Drizzle database instance.
- * @param {number} registeryId - The file registry ID.
+ * @param {number} registryId - The file registry ID.
  * @returns {Promise<void>}
  */
-export async function setDownloadAsComplete(db, registeryId) {
-    const registry = await getFileRegistryRecord(db, registeryId);
+export async function setDownloadAsComplete(db, registryId) {
+    const registry = await getFileRegistryRecord(db, registryId);
     const download = await db.select().from(downloadRecord)
-        .where(eq(downloadRecord.registryId, registeryId))
+        .where(eq(downloadRecord.registryId, registryId))
         .get();
 
-    if (!download) throw new Error(`No download record for registry ${registeryId}`);
+    if (!download) throw new Error(`No download record for registry ${registryId}`);
 
     const tempFilePath = registry.fileSourcePath;
     const finalFilePath = download.finalDestination;
@@ -620,17 +714,14 @@ export async function setDownloadAsComplete(db, registeryId) {
     await createDirectory(path.dirname(finalFilePath));
     await fs.rename(tempFilePath, finalFilePath);
 
-    const handler = await openFile(finalFilePath);
-    const metaHash = await getFileMetaHash(handler);
-
-    await closeFile(handler);
+    const metaHash = await getFileMetaHashFromSource(finalFilePath);
 
     await db.update(fileRegistry)
         .set({ fileSourcePath: finalFilePath, metaHash: metaHash })
-        .where(eq(fileRegistry.id, registeryId));
+        .where(eq(fileRegistry.id, registryId));
 
     await db.delete(downloadRecord)
-        .where(eq(downloadRecord.registryId, registeryId));
+        .where(eq(downloadRecord.registryId, registryId));
 }
 
 /**
@@ -663,4 +754,14 @@ export async function updateDownloadRecord(db, params) {
     await db.update(fileRegistry)
         .set({ metaHash: metaHash })
         .where(eq(fileRegistry.id, registryId));
+}
+
+/**
+ * Lists all download records from database.
+ * @param {Object} db - Drizzle database instance.
+ * @returns {Promise<Array<Object>>}
+ */
+export async function listDownloadRecords(db) {
+    const query = await db.select().from(downloadRecord);
+    return query;
 }

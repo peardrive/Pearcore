@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Readable } from "stream";
-import { generateMerkleTree, validateMerkleTree, verifyMerkleTree } from "../../src/utils/merkletree.utils";
+import {
+    generateMerkleTree,
+    getLeafCount,
+    validateMerkleTree,
+    verifyMerkleTree
+} from "../../src/utils/merkletree.utils";
 
 function createStream(chunks) {
     return Readable.from(chunks);
@@ -33,7 +38,6 @@ describe('Merkle Tree', () => {
                 chunkSize: 1024
             });
 
-            expect(tree.leafCount).toBe(1);
             expect(tree.height).toBe(0);
 
             expect(tree.levels[0]).toHaveLength(1);
@@ -50,7 +54,6 @@ describe('Merkle Tree', () => {
                 chunkSize: 1024
             });
 
-            expect(tree.leafCount).toBe(2);
             expect(tree.height).toBe(1);
 
             expect(tree.levels[1]).toHaveLength(2);
@@ -74,8 +77,6 @@ describe('Merkle Tree', () => {
                 size: chunkSize * 3,
                 chunkSize
             });
-
-            expect(tree.leafCount).toBe(3);
 
             expect(tree.levels[2]).toHaveLength(3);
             expect(tree.levels[1]).toHaveLength(2);

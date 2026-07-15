@@ -568,8 +568,8 @@ export async function querySpace(db, filters = {}) {
 /**
  * List all spaces, optionally filtered by publicKey
  * @param {Object} db - Database instance
- * @param {Object} [opts] - Optional filters
- * @param {string} [opts.publicKey] - Filter by space creator's public key
+ * @param {Object} opts - Optional filters
+ * @param {string} opts.publicKey - Filter by space creator's public key
  * @returns {Array} - Array of space objects with whitelists
  */
 export async function listSpaces(db, opts = {}) {
@@ -616,6 +616,23 @@ export async function listSpaces(db, opts = {}) {
 }
 
 /**
+ * Creates a map for space ID -> topic hash.
+ * @param {Object} db - Drizzle database instance.
+ * @returns {Map<number, string>}
+ */
+export async function getSpaceTopicMap(db) {
+  const spaces = await listSpaces(db);
+  const spaceTopicMap = new Map();
+
+  for (const space of spaces) {
+    const topicHash = getSpaceTopicHash(space);
+    spaceTopicMap.set(space.id, topicHash);
+  }
+
+  return spaceTopicMap;
+}
+
+/**
  * Deletes a space and it's associated whitelist entries.
  * 
  * @param {Object} db - Drizzle database instance
@@ -631,80 +648,4 @@ export async function deleteSpace(db, spaceId) {
 
   await db.delete(spaces)
     .where(eq(spaces.id, spaceId));
-}
-
-//TODO
-/**
- * Filters spaces by intersection with a peer's topic interests.
- *
- * @param {Array<object>} spaces - All available spaces
- * @param {Array<string>} peerTopicHashes - Topic hashes the peer is subscribed to
- * @returns {Array<object>} Matching spaces with resolved topic info
- */
-export function filterSpacesByPeerTopics(spaces, peerTopicHashes) {
-  if (!Array.isArray(spaces) || peerTopicHashes.length === 0) {
-    return [];
-  }
-
-  const matches = [];
-
-  for (const space of spaces) {
-    try {
-      const topic = generateSpaceTopic(
-        space.spaceName,
-        space.publicKey,
-        space.nonce
-      );
-
-      const topicHash = hex(hash(topic));
-
-      if (peerTopicHashes.includes(topicHash)) {
-        matches.push({ space, topic, topicHash });
-      }
-    } catch (err) {
-      logger.warn('Failed to resolve space topic', {
-        spaceName: space?.spaceName,
-        error: err.message
-      });
-    }
-  }
-
-  return matches;
-}
-
-//TODO
-/**
- * Get all user profiles that are members of a given space.
- *
- * @param {Object} db - Drizzle database instance
- * @param {number} spaceId - ID of the space
- * @returns {Promise<Array>} Array of user profile objects
- *
- * Output format:
- * [
- *   { id, username, tag, profileURL, publicKey, signature },
- *   ...
- * ]
- */
-export async function getSpaceMembers(db, spaceId) {
-  // 1. Fetch all membership records for the space
-  const members = await db
-    .select()
-    .from(spaceMembers)
-    .where(eq(spaceMembers.spaceId, spaceId))
-    .all();
-
-  if (members.length === 0) return [];
-
-  // 2. Extract list of user profile IDs
-  const userIds = members.map(m => m.userProfileId);
-
-  // 3. Fetch all profiles in a single query
-  const profiles = await db
-    .select()
-    .from(userProfiles)
-    .where(inArray(userProfiles.id, userIds))
-    .all();
-
-  return profiles;
 }

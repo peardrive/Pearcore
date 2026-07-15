@@ -1,6 +1,8 @@
 import * as EVENTS from "../constants/events.constants.js";
-import { isObject, isString, now, validateFilePath, validateHexString, validateTimestamp } from './general.utils.js';
 import { validateSpaceContext } from './space.utils.js';
+import { validateProfileContext } from "./profile.utils.js";
+import { validateSpaceFilePath } from "./files.utils.js";
+import { validateMerkleTree } from "./merkletree.utils.js";
 import {
     hex,
     hash,
@@ -11,8 +13,21 @@ import {
     verifySignedJSON,
     canonicalStringify,
 } from './crypto.utils.js';
-import { validateProfileContext } from "./profile.utils.js";
-import { notNull, notUndefined, isDefined, nonceIsValid, spaceSecretIsValid } from "./general.utils.js";
+import {
+    isNumber,
+    isObject,
+    isString,
+    now,
+    validateFilePath,
+    validateHexString,
+    validateTimestamp,
+    notNull,
+    notUndefined,
+    isDefined,
+    nonceIsValid,
+    spaceSecretIsValid,
+    topicIsValid
+} from './general.utils.js';
 
 /**
  * Generates deterministic nonce from object payload
@@ -26,13 +41,13 @@ export function generateNonceFromPayoad(payload) {
 }
 
 /**
- * Verify a signed message
+ * Verify a signed message.
  * @param {object} message - The full signed message
  * @returns {Promise<boolean>} True if the signature is valid, false otherwise
  */
 export async function verifyMessageSignature(message) {
     if (!message.signature || !message.publicKey) {
-        throw new Error('Message missing signature or publicKey')
+        throw new Error('Message missing signature or publicKey');
     }
 
     if (typeof message.signature !== 'string') {
@@ -44,10 +59,10 @@ export async function verifyMessageSignature(message) {
         return false;
     }
 
-    const { signature, ...messageContext } = message
+    const { signature, ...messageContext } = message;
 
-    const isValid = await verifySignedJSON(messageContext, signature, messageContext.publicKey)
-    return isValid
+    const isValid = await verifySignedJSON(messageContext, signature, messageContext.publicKey);
+    return isValid;
 }
 
 /**
@@ -98,17 +113,6 @@ export async function decryptPayload({
     spaceSecret,
     nonce
 }) {
-    const isString = input => typeof input === 'string';
-
-    const nonceIsValid = nonce =>
-        isString(nonce) &&
-        validateHexString(nonce) &&
-        nonce.length === 24;
-
-    const spaceSecretIsValid = secret =>
-        isString(secret) &&
-        validateHexString(secret) &&
-        secret.length == 64;
 
     if (!nonceIsValid(nonce)) throw new Error('nonce is invalid');
     if (!spaceSecretIsValid(spaceSecret)) throw new Error('spaceSecret is invalid');
@@ -151,13 +155,13 @@ export async function createBaseMessage({
     nonce,
     timestamp
 }) {
-    if (!type) throw new Error('type is required')
-    if (!topic) throw new Error('topic is required')
-    if (!publicKey) throw new Error('publicKey is required')
-    if (!secretKey) throw new Error('secretKey is required')
+    if (!type) throw new Error('type is required');
+    if (!topic) throw new Error('topic is required');
+    if (!publicKey) throw new Error('publicKey is required');
+    if (!secretKey) throw new Error('secretKey is required');
 
-    const finalNonce = nonce ?? hex(randomNonce())
-    const finalTimestamp = timestamp ?? now()
+    const finalNonce = nonce ?? hex(randomNonce());
+    const finalTimestamp = timestamp ?? now();
 
     const unsignedMsg = {
         type,
@@ -166,7 +170,7 @@ export async function createBaseMessage({
         nonce: finalNonce,
         timestamp: finalTimestamp,
         payload
-    }
+    };
 
     const signature = await signJSON(unsignedMsg, secretKey);
 
@@ -248,24 +252,24 @@ export async function createRejectionMessage({
     nonce,
     timestamp
 }) {
-    if (!reason) throw new Error('reason is required')
-    if (!secretKey) throw new Error('secretKey is required')
-    if (!publicKey) throw new Error('publicKey is required')
+    if (!reason) throw new Error('reason is required');
+    if (!secretKey) throw new Error('secretKey is required');
+    if (!publicKey) throw new Error('publicKey is required');
 
     const payload = {
         linkedMessageNonce: linkedMessageNonce || EVENTS.noNonce,
         reason
-    }
+    };
 
     return await createBaseMessage({
         type: EVENTS.Reject,
         topic: topic || EVENTS.noTopic,
-        nonce: nonce || generateNonceFromPayoad(payload),
+        nonce: nonce,
         payload,
         publicKey,
         secretKey,
         timestamp
-    })
+    });
 }
 
 /**
@@ -298,11 +302,15 @@ export async function createRejectionForMessage({
         // keypair
         secretKey,
         publicKey,
-    })
+    });
 }
 
 /**
  * Create a signed profile update message.
+ * 
+ * - Additionally message will maintain deterministic nonce from profile payload and publicKey
+ * to lower the duplicated message rate in the network. optionally pass params.nonce value to
+ * avoid this behaviour.
  *
  * @param {Object} params
  * @param {Object} params.profile - User profile metadata object
@@ -335,7 +343,7 @@ export async function createProfileUpdateMessage({
     return await createBaseMessage({
         type: EVENTS.ProfileUpdate,
         topic: EVENTS.noTopic,
-        nonce: nonce || generateNonceFromPayoad(payload),
+        nonce: nonce || generateNonceFromPayoad({ publicKey, payload }),
         payload,
         publicKey,
         secretKey,
@@ -358,15 +366,9 @@ export function validateProfileUpdateMessagePayload(message) {
         };
     }
 
-    const isString = item => typeof item === 'string';
-    const hasExactLength = (item, length) => item.length === length;
-    const isValidTopic = item => {
-        return isString(item) && hasExactLength(item, 64) && validateHexString(item)
-    };
-
     const topicsRules = [
         ['topics should be an array', () => Array.isArray(topics)],
-        ['topics should contain 64 character hex strings', () => topics.every(item => isValidTopic(item))],
+        ['topics should contain 64 character hex strings', () => topics.every(item => topicIsValid(item))],
     ];
 
     for (const [reason, condition] of topicsRules) {
@@ -386,6 +388,10 @@ export function validateProfileUpdateMessagePayload(message) {
 
 /**
  * Create a signed space sync message.
+ * 
+ * - Additionally message will maintain deterministic nonce from the space payload
+ * to lower the duplicated message rate in the network. optionally pass params.nonce value to
+ * avoid this behaviour.
  *
  * @param {Object} params
  * @param {string} params.topic - Topic the space sync message belongs to
@@ -405,14 +411,12 @@ export async function createSpaceSyncMessage({
     nonce,
     timestamp
 }) {
-    if (!topic) throw new Error('topic is required')
-    if (!space) throw new Error('space is required')
-    if (!secretKey) throw new Error('secretKey is required')
-    if (!publicKey) throw new Error('publicKey is required')
+    if (!topic) throw new Error('topic is required');
+    if (!space) throw new Error('space is required');
+    if (!secretKey) throw new Error('secretKey is required');
+    if (!publicKey) throw new Error('publicKey is required');
 
-    const payload = {
-        ...space
-    }
+    const payload = space;
 
     return await createBaseMessage({
         type: EVENTS.SpaceSync,
@@ -479,19 +483,19 @@ export async function createSpaceHashListMessage({
     nonce,
     timestamp
 }) {
-    if (!hashList) throw new Error('hashList is required')
-    if (!secretKey) throw new Error('secretKey is required')
-    if (!publicKey) throw new Error('publicKey is required')
+    if (!hashList) throw new Error('hashList is required');
+    if (!secretKey) throw new Error('secretKey is required');
+    if (!publicKey) throw new Error('publicKey is required');
 
     return await createBaseMessage({
         type: EVENTS.SpaceHashList,
         topic: EVENTS.noTopic,
         payload: hashList,
-        nonce: nonce || generateNonceFromPayoad({ publicKey, hashList }),
+        nonce: nonce,
         secretKey,
         publicKey,
         timestamp
-    })
+    });
 }
 
 
@@ -566,7 +570,7 @@ export async function createSpaceMessage({
         publicKey,
         nonce,
         timestamp
-    })
+    });
 }
 
 /**
@@ -576,8 +580,8 @@ export async function createSpaceMessage({
  * @param {Array} params.events - List of events in format of { action, files }
  * @param {Uint8Array} params.secretKey - Sender's Ed25519 secret key
  * @param {Uint8Array} params.publicKey - Sender's Ed25519 public key
- * @param {string} [params.nonce] - Optional pre-generated nonce (hex)
- * @param {number} [params.timestamp] - Optional timestamp override
+ * @param {string} params.nonce - Optional pre-generated nonce (hex)
+ * @param {number} params.timestamp - Optional timestamp override
  * @returns 
  */
 export async function createSpaceFileEventMessage({
@@ -589,6 +593,7 @@ export async function createSpaceFileEventMessage({
     timestamp
 }) {
     if (!topic) throw new Error('topic is required');
+    if (!events) throw new Error('events is required');
     if (!secretKey) throw new Error('secretKey is required');
     if (!publicKey) throw new Error('publicKey is required');
 
@@ -600,7 +605,7 @@ export async function createSpaceFileEventMessage({
         publicKey,
         nonce,
         timestamp
-    })
+    });
 }
 
 // List of file event actions as an array
@@ -630,7 +635,7 @@ const validateEvent = event => {
 }
 
 /**
- * Validates SpaceFileEvent message.
+ * Validates SpaceFileEvent payload.
  * @param {Object} message - The SpaceFileEvent message
  * @returns {{ isValid: Boolean, reason: string }}
  */
@@ -693,27 +698,37 @@ export async function verifySpaceFileRecordSignature(record) {
     return await verifySignedJSON(payload, signature, publicKey);
 }
 
+/**
+ * Creates request message for file Merkle Tree.
+ * @param {Object} params
+ * @param {string} params.topic - Topic the message belongs
+ * @param {Array} params.spaceFilePath - The file path within the space.
+ * @param {Array} params.rootHash - The specific root hash of the requested space file.
+ * @param {Uint8Array} params.secretKey - Sender's Ed25519 secret key
+ * @param {Uint8Array} params.publicKey - Sender's Ed25519 public key
+ * @param {string} params.nonce - Optional pre-generated nonce (hex)
+ * @param {number} params.timestamp - Optional timestamp override
+ * @returns {Promise<Object>}
+ */
 export async function createSpaceFileTreeRequestMessage({
     topic,
-    taskKey,
-    rootHash,
     spaceFilePath,
+    rootHash,
     publicKey,
     secretKey,
     nonce,
     timestamp
 }) {
     if (!topic) throw new Error('topic is required');
-    if (!taskKey) throw new Error('action is required');
-    if (!rootHash) throw new Error('action is required');
-    if (!spaceFilePath) throw new Error('context is required');
+    if (!rootHash) throw new Error('rootHash is required');
+    if (!spaceFilePath) throw new Error('spaceFilePath is required');
     if (!secretKey) throw new Error('secretKey is required');
     if (!publicKey) throw new Error('publicKey is required');
 
-    const payload = {spaceFilePath, rootHash };
+    const payload = { spaceFilePath, rootHash };
 
     return await createBaseMessage({
-        type: EVENTS.SpaceFileRequest,
+        type: EVENTS.SpaceFileTreeRequest,
         topic,
         payload: payload,
         secretKey,
@@ -723,26 +738,67 @@ export async function createSpaceFileTreeRequestMessage({
     })
 }
 
+/**
+ * Validates SpaceFileTreeRequest payload.
+ * @param {Object} message - The SpaceFileTreeRequest message
+ * @returns {{ isValid: Boolean, reason: string }}
+ */
+export function validateSpaceFileTreeRequestPayload(message) {
+    const { spaceFilePath, rootHash } = message.payload;
+
+    const rules = [
+        ['rootHash is required', () => isDefined(rootHash)],
+        ['spaceFilePath is required', () => isDefined(spaceFilePath)],
+        ['rootHash should be hex string', () => isString(rootHash) && validateHexString(rootHash)],
+        ['spaceFilePath should be string', () => isString(spaceFilePath)],
+    ];
+
+    for (const [reason, condition] of rules) {
+        if (!condition()) {
+            return { isValid: false, reason };
+        }
+    }
+
+    const pathStatus = validateSpaceFilePath(spaceFilePath);
+    if (!pathStatus.isValid) return pathStatus;
+
+    return { isValid: true, reason: 'request is valid' };
+}
+
+/**
+ * Creates request message for file Merkle Tree.
+ * @param {Object} params
+ * @param {string} params.topic - Topic the message belongs
+ * @param {Array} params.tree - The file path within the space.
+ * @param {Array} params.lastRequestableLeaf - The specific root hash of the requested space file.
+ * @param {Array} params.replyNonce - The specific root hash of the requested space file.
+ * @param {Uint8Array} params.secretKey - Sender's Ed25519 secret key
+ * @param {Uint8Array} params.publicKey - Sender's Ed25519 public key
+ * @param {string} params.nonce - Optional pre-generated nonce (hex)
+ * @param {number} params.timestamp - Optional timestamp override
+ * @returns 
+ */
 export async function createSpaceFileTreeResponseMessage({
     topic,
-    taskKey,
-    rootHash,
-    spaceFilePath,
-    publicKey,
+    tree,
+    lastRequestableLeaf,
+    replyNonce,
     secretKey,
+    publicKey,
     nonce,
     timestamp
 }) {
     if (!topic) throw new Error('topic is required');
-    if (!rootHash) throw new Error('action is required');
-    if (!spaceFilePath) throw new Error('context is required');
+    if (!tree) throw new Error('tree is required');
+    if (!Number.isInteger(lastRequestableLeaf)) throw new Error('lastRequestableLeaf is required');
+    if (!replyNonce) throw new Error('replyNonce is required');
     if (!secretKey) throw new Error('secretKey is required');
     if (!publicKey) throw new Error('publicKey is required');
 
-    const payload = { spaceFilePath, rootHash, totalLeafs, storedLeafs };
+    const payload = { tree, lastRequestableLeaf, replyNonce };
 
     return await createBaseMessage({
-        type: EVENTS.SpaceFileRequest,
+        type: EVENTS.SpaceFileTreeResponse,
         topic,
         payload: payload,
         secretKey,
@@ -750,4 +806,97 @@ export async function createSpaceFileTreeResponseMessage({
         nonce,
         timestamp
     })
+}
+
+/**
+ * Validates createSpaceFileTreeResponseMessage payload.
+ * @param {Object} message - The SpaceFileTreeResponse message
+ * @returns {{ isValid: Boolean, reason: string }}
+ */
+export function validateSpaceFileTreeResponsePayload(message) {
+    const { tree, lastRequestableLeaf, replyNonce } = message.payload;
+
+    const rules = [
+        ['tree is required', () => isDefined(tree)],
+        ['lastRequestableLeaf is required', () => isDefined(lastRequestableLeaf)],
+        ['lastRequestableLeaf should be a number', () => isNumber(lastRequestableLeaf)],
+        ['replyNonce is required', () => isDefined(replyNonce)],
+        ['replNonce should 24 characters string', () => isString(replyNonce) && replyNonce.length === 24],
+        ['replyNonce should be valid hex string', () => validateHexString(replyNonce)]
+    ];
+
+    for (const [reason, condition] of rules) {
+        if (!condition()) {
+            return { isValid: false, reason };
+        }
+    }
+
+    const treeStatus = validateMerkleTree(tree);
+    if (!tree.isValid) return treeStatus;
+
+    return { isValid: true, reason: 'response is valid' };
+}
+
+/**
+ * Creates signed space file content request.
+ * @param {Object} params
+ * @param {string} params.topic - Topic the message belongs
+ * @param {Array} params.tree - The file path within the space.
+ * @param {Array} params.lastRequestableLeaf - The specific root hash of the requested space file.
+ * @param {Array} params.replyNonce - The specific root hash of the requested space file.
+ * @param {Uint8Array} params.secretKey - Sender's Ed25519 secret key
+ * @param {Uint8Array} params.publicKey - Sender's Ed25519 public key
+ * @param {string} params.nonce - Optional pre-generated nonce (hex)
+ * @param {number} params.timestamp - Optional timestamp override
+ * @returns 
+ */
+export async function createSpaceFileContentRequestMessage({
+    topic,
+    leafStart,
+    leafStop,
+    secretKey,
+    publicKey,
+    nonce,
+    timestamp
+}) {
+    if (!topic) throw new Error('topic is required');
+    if (!Number.isInteger(leafStart)) throw new Error('leafStart is required and should be number');
+    if (!Number.isInteger(leafStop)) throw new Error('leafStop is required and should be number');
+    if (!secretKey) throw new Error('secretKey is required');
+    if (!publicKey) throw new Error('publicKey is required');
+
+    const payload = { slice: [leafStart, leafStop] };
+
+    return await createBaseMessage({
+        type: EVENTS.SpaceFileContentRequest,
+        topic,
+        payload: payload,
+        secretKey,
+        publicKey,
+        nonce,
+        timestamp
+    })
+}
+
+/**
+ * Validates createSpaceFileContentRequestMessage payload.
+ * @param {Object} message - The SpaceFileEvent message
+ * @returns {{ isValid: Boolean, reason: string }}
+ */
+export function validateSpaceFileContentPayload(message) {
+    const { slice } = message.payload;
+
+    const rules = [
+        ['slice should be an array', () => Array.isArray(slice)],
+        ['start should be an integer', () => Number.isNumber(slice[0])],
+        ['stop should be an integer', () => Number.isNumber(slice[1])],
+    ];
+
+    for (const [reason, condition] of rules) {
+        if (!condition()) {
+            return { isValid: false, reason };
+        }
+    }
+
+    return { isValid: true, reason: 'message is valid' };
 }

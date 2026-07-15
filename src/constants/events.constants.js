@@ -69,7 +69,10 @@ export const SpaceFileEventOptions = {
     REMOVE: 'remove',
 };
 
-/**
- * Emitted when peer wants to ask for file tree information from connected node.
- */
-export const SpaceFileRequest = "SpaceFileRequest";
+
+// Emitted when peer wants to ask for file Merkle tree information from connected node.
+export const SpaceFileTreeRequest = "SpaceFileTreeRequest";
+// Emitted when peer response to space file tree request.
+export const SpaceFileTreeResponse = "SpaceFileTreeResponse";
+// Emitter when peers wants to ask for file download.
+export const SpaceFileContentRequest = "SpaceFileContentRequest";

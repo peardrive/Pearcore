@@ -100,6 +100,16 @@ export class ConnectionManager {
     }
 
     /**
+     * Creates direct connection with other nodes in the network.
+     * @param {string} publicKey - 64-character hex string publickey.
+     */
+    connectWith(publicKey) {
+        if (this.swarmInstance) {
+            this.swarmInstance.joinPeer(hexToUint8(publicKey));
+        }
+    }
+
+    /**
      * Quit Network discovery for specific space. The node will maintain the already stablished socket connections.
      * @param {String} spaceTopicHash - The space topic hash
      */

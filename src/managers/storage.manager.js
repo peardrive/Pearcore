@@ -94,7 +94,7 @@ export class StorageManager {
     async deleteSpace(queryParams) {
         const spaceQuery = await querySpace(this.db, queryParams);
         for (const space of spaceQuery) {
-            await deleteSpace(this.db, space.spaceId);
+            await deleteSpace(this.db, space.id);
         }
     }
 

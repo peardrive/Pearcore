@@ -98,7 +98,7 @@ export class AccountService {
       secretKey: creds.secretKey
     });
 
-    this.managers.session.setAccount({ username: creds.username });
+    this.managers.session.setAccount({ username: creds.username, directory: this.root });
     this.managers.session.setDatabase({ db, sqlite });
 
     // loads the p2p discovery for the account
@@ -140,7 +140,7 @@ export class AccountService {
 
     const { db, sqlite } = this.managers.session.getDatabase();
     const { publicKey, secretKey } = this.managers.session.getCredentials();
-    const { username } = this.managers.session.getAcccount();
+    const { username } = this.managers.session.getAccount();
 
     if (
       isDefined(db) && isDefined(sqlite) &&

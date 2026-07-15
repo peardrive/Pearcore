@@ -26,7 +26,7 @@ export const fileRegistry = sqliteTable('file_registry', {
     timestamp: integer("timestamp").notNull(),
 
     spaceId: integer("space_id").notNull()
-        .references(() => spaces.id),
+        .references(() => spaces.id, { onDelete: "cascade" }),
 
     spacePath: text("space_path").notNull(),
     spaceFilename: text("space_filename").notNull(),
@@ -56,7 +56,7 @@ export const fileRegistry = sqliteTable('file_registry', {
  */
 export const fileIndex = sqliteTable("file_index", {
     registryId: integer("file_registry_id").notNull()
-        .references(() => fileRegistry.id),
+        .references(() => fileRegistry.id, { onDelete: "cascade" }),
 
     rootHash: text("root_hash").notNull(),
     level: integer("level").notNull(),
