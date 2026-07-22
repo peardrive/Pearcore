@@ -1376,7 +1376,7 @@ export class SpaceFileManager {
     }
 
     get db() {
-        return this.sessionManager.getCredentials().db;
+        return this.sessionManager.getDatabase().db;
     }
 
     /**

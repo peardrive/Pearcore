@@ -123,7 +123,7 @@ export class AccountService {
     await this.managers.connection.destroy();
 
     const { sqlite } = this.managers.session.getDatabase();
-    await sqlite.close();
+    sqlite.close();
 
     this.managers.session.reset();
     this.managers.throttle.clear();
