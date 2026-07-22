@@ -1,3 +1,6 @@
+import { FrameTypes } from '../managers/multiplexer.manager';
+
+
 export class BaseProtocolHandler {
     constructor(emitter, managers) {
         this.storageManager = managers.storage;
@@ -19,7 +22,11 @@ export class BaseProtocolHandler {
     get db() {
         return this.sessionManager.getDatabase().db;
     }
-    
+
+    async sendStreamToSocket(stream, socket) {
+        await this.muxManager.send(socket, stream, FrameTypes.STREAM);
+    }
+
     async handle(socket, message, info) {
         throw new Error("Handle method must be implemented by subclass");
     }

@@ -776,7 +776,7 @@ export function validateSpaceFileTreeRequestPayload(message) {
  * @param {Uint8Array} params.publicKey - Sender's Ed25519 public key
  * @param {string} params.nonce - Optional pre-generated nonce (hex)
  * @param {number} params.timestamp - Optional timestamp override
- * @returns 
+ * @returns {Promise<Object>}
  */
 export async function createSpaceFileTreeResponseMessage({
     topic,
@@ -841,31 +841,36 @@ export function validateSpaceFileTreeResponsePayload(message) {
  * Creates signed space file content request.
  * @param {Object} params
  * @param {string} params.topic - Topic the message belongs
- * @param {Array} params.tree - The file path within the space.
- * @param {Array} params.lastRequestableLeaf - The specific root hash of the requested space file.
- * @param {Array} params.replyNonce - The specific root hash of the requested space file.
+ * @param {string} params.spaceFilePath - Virtual file path in the space.
+ * @param {number} params.leafStart - First leaf of the Merkle tree in the sequence.
+ * @param {number} params.leafStop - Last leaf of the Merkle tree in the sequence.
+ * @param {string} params.downloadKey - Request download key for stream routing.
  * @param {Uint8Array} params.secretKey - Sender's Ed25519 secret key
  * @param {Uint8Array} params.publicKey - Sender's Ed25519 public key
  * @param {string} params.nonce - Optional pre-generated nonce (hex)
  * @param {number} params.timestamp - Optional timestamp override
- * @returns 
+ * @returns {Promise<Object>} 
  */
 export async function createSpaceFileContentRequestMessage({
     topic,
+    spaceFilePath,
     leafStart,
     leafStop,
+    downloadKey,
     secretKey,
     publicKey,
     nonce,
     timestamp
 }) {
     if (!topic) throw new Error('topic is required');
+    if (!spaceFilePath) throw new Error('spaceFilePath is required');
+    if (!downloadKey) throw new Error('downloadKey is required');
     if (!Number.isInteger(leafStart)) throw new Error('leafStart is required and should be number');
     if (!Number.isInteger(leafStop)) throw new Error('leafStop is required and should be number');
     if (!secretKey) throw new Error('secretKey is required');
     if (!publicKey) throw new Error('publicKey is required');
 
-    const payload = { slice: [leafStart, leafStop] };
+    const payload = { spaceFilePath, slice: [leafStart, leafStop], key: downloadKey };
 
     return await createBaseMessage({
         type: EVENTS.SpaceFileContentRequest,
@@ -883,13 +888,15 @@ export async function createSpaceFileContentRequestMessage({
  * @param {Object} message - The SpaceFileEvent message
  * @returns {{ isValid: Boolean, reason: string }}
  */
-export function validateSpaceFileContentPayload(message) {
-    const { slice } = message.payload;
+export function validateSpaceFileContentRequestPayload(message) {
+    const { spaceFilePath, slice, key } = message.payload;
 
     const rules = [
+        ['spaceFilePath should be a string', () => isString(spaceFilePath)],
         ['slice should be an array', () => Array.isArray(slice)],
-        ['start should be an integer', () => Number.isNumber(slice[0])],
-        ['stop should be an integer', () => Number.isNumber(slice[1])],
+        ['start should be an integer', () => Number.isInteger(slice[0])],
+        ['stop should be an integer', () => Number.isInteger(slice[1])],
+        ['key should be a string', () => isString(key)]
     ];
 
     for (const [reason, condition] of rules) {

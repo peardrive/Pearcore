@@ -21,11 +21,6 @@ export function initializeManagers(emitter) {
         sessionManager,
     });
 
-    const spaceFileManager = new SpaceFileManager(emitter, {
-        sessionManager,
-        spaceFileListManager
-    });
-
     const throttleManager = new ThrottleManager(emitter, {
         sessionManager,
         storageManager
@@ -46,6 +41,14 @@ export function initializeManagers(emitter) {
         storageManager,
         messageManager,
         muxManager
+    });
+
+    const spaceFileManager = new SpaceFileManager(emitter, {
+        sessionManager,
+        socketManager,
+        messageManager,
+        connectionManager,
+        spaceFileListManager
     });
 
     muxManager.setHandlers([
@@ -77,7 +80,8 @@ export function initializeManagers(emitter) {
         throttle: throttleManager,
         mux: muxManager,
         message: messageManager,
-        spaceFileList: spaceFileListManager,
         connection: connectionManager,
+        spaceFileList: spaceFileListManager,
+        spaceFiles: spaceFileManager,
     };
 }

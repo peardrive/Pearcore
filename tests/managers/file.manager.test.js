@@ -471,6 +471,10 @@ describe("File Management", () => {
 
         });
 
+        afterEach(async () => {
+            await broadcaster.flush();
+        });
+
         it('should add an event to the stack and flush it', async () => {
             const signedEvent = await createSignedEvent({
                 topic: topic,
@@ -538,6 +542,7 @@ describe("File Management", () => {
 
     describe('LocalFileRegistry', () => {
         let core = null;
+        let broadcaster = null;
         let localFileRegistry = null;
         let temporaryDirectory = null;
         let filePath = null;
@@ -554,7 +559,7 @@ describe("File Management", () => {
             space = await core.space.create({ spaceName: 'testspace' });
             db = core.managers.session.getDatabase().db;
 
-            const broadcaster = new FileEventBroadcaster(core.emitter, {
+            broadcaster = new FileEventBroadcaster(core.emitter, {
                 sessionManager: core.managers.session,
                 socketManager: core.managers.sockets,
                 messageManager: core.managers.message
@@ -569,6 +574,7 @@ describe("File Management", () => {
 
         afterEach(async () => {
             await localFileRegistry.stop();
+            await broadcaster.flush();
             await cleanup(temporaryDirectory);
         });
 

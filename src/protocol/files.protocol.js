@@ -13,9 +13,13 @@ import {
     validateSpaceFileTreeRequestPayload,
     createSpaceFileTreeResponseMessage,
     validateSpaceFileTreeResponsePayload,
+    validateSpaceFileContentRequestPayload,
 } from '../utils/protocol.utils.js';
-import { getDownloadRecord, getFileTreeRecord, queryFileRegistryRecords } from '../utils/files.utils.js';
+import { getDownloadRecord, getFileChunk, getFileTreeRecord, openFileFromRegistry, queryFileRegistryRecords } from '../utils/files.utils.js';
 import { verifyMerkleTree } from '../utils/merkletree.utils.js';
+import { getSpace, getSpaceToTopicMap, getTopicToSpaceMap } from '../utils/space.utils.js';
+import { DEFAULT_CHUNK_SIZE } from '../constants/global.constants.js';
+import { closeFile } from '../utils/system.utils.js';
 
 
 export class SpaceFileEventHandler extends BaseProtocolHandler {
@@ -263,5 +267,87 @@ export class SpaceFileTreeResponseHandler extends BaseProtocolHandler {
         }
 
         this.emit(EVENTS.SpaceFileTreeResponse, { info, message });
+    }
+}
+
+export class SpaceFileContentRequestHandler extends BaseProtocolHandler {
+    async handle(socket, message, info) {
+        if (message.publicKey !== hex(info.publicKey)) {
+            await this.messageManager.reject(socket, message, MESSAGES.NO_RELAY_MESSAGE);
+            return;
+        }
+
+        const result = validateSpaceFileContentRequestPayload(message);
+        if (!result.isValid) {
+            await this.messageManager.reject(socket, message, result.reason);
+            return;
+        }
+
+        const topicMap = await getTopicToSpaceMap(this.db);
+        const spaceId = topicMap.get(message.topic);
+
+        if (!spaceId) {
+            await this.messageManager.reject(socket, message, MESSAGES.SPACE_NOT_FOUND_MESSAGE);
+            return;
+        }
+
+        const space = await getSpace(this.db, spaceId);
+        if (!publicKeyIsAllowedToRead(message.publicKey, space)) {
+            await this.messageManager.reject(socket, message, MESSAGES.READ_PERMISSION_NOT_ALLOWED_MESSAGE);
+            return;
+        }
+
+        const { spaceFilePath, slice, key } = message.payload;
+
+        const parsed = parseFilePath(spaceFilePath);
+        const spacePath = parsed.dir;
+        const spaceFilename = parsed.filename;
+
+        const registryRecords = await queryFileRegistryRecords(this.db, {
+            spaceId: spaceId,
+            spacePath: spacePath,
+            spaceFilename: spaceFilename
+        });
+
+        if (registryRecords.length === 0) {
+            await this.messageManager.reject(socket, message, MESSAGES.SPACE_FILE_NOT_FOUND);
+            return;
+        }
+
+        const registry = registryRecords[0];
+        const downloadRecord = await getDownloadRecord(this.db, registry.id);
+        const maxAvailableLeafs = downloadRecord ? downloadRecord.lastPushedLeaf : registry.leafCount - 1;
+
+        const [startLeaf, endLeaf] = slice;
+        
+        if (startLeaf < 0 || endLeaf > maxAvailableLeafs || startLeaf > endLeaf) {
+            await this.messageManager.reject(socket, message, MESSAGES.SLICE_NOT_AVAILABLE_MESSAGE);
+            return;
+        }
+
+        let fileHandler;
+        try {
+            fileHandler = await openFileFromRegistry(this.db, registry.id);
+        } catch (error) {
+            await this.messageManager.reject(socket, message, MESSAGES.FILE_NOT_ACCESSIBLE_MESSAGE);
+        }
+
+        const keyBuffer = Buffer.from(key, 'hex');
+        console.log(keyBuffer.length)
+        const stats = await fileHandler.stat();
+        const size = stats.size;
+
+        for (let leaf = startLeaf; leaf <= endLeaf; leaf++) {
+            const chunk = await getFileChunk(fileHandler, size, leaf, DEFAULT_CHUNK_SIZE);
+
+            const leafIndexBuffer = Buffer.alloc(4);
+            leafIndexBuffer.writeUInt32BE(leaf, 0);
+
+            const framePayload = Buffer.concat([keyBuffer, leafIndexBuffer, chunk]);
+            await this.sendStreamToSocket(framePayload, socket);
+        }
+
+        await closeFile(fileHandler);
+        this.emit(EVENTS.SpaceFileContentRequest, { info, message });
     }
 }

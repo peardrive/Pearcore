@@ -7,6 +7,7 @@ import {
     SpaceSyncHandler
 } from './space.protocol.js';
 import {
+    SpaceFileContentRequestHandler,
     SpaceFileEventHandler,
     SpaceFileTreeRequestHandler,
     SpaceFileTreeResponseHandler
@@ -44,5 +45,9 @@ export const ProtocolMapFactory = (emitter, managers) => [
     {
         type: EVENTS.SpaceFileTreeResponse,
         handler: new SpaceFileTreeResponseHandler(emitter, managers)
+    }, 
+    {
+        type: EVENTS.SpaceFileContentRequest,
+        handler: new SpaceFileContentRequestHandler(emitter, managers)
     }
 ];

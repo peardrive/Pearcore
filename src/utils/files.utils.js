@@ -486,7 +486,7 @@ export async function getFileChunk(handler, fileSize, leafIndex, chunkSize = DEF
  * @param {string} params.spacePath - Virtual directory path for space.
  * @param {string} params.spaceFilename - Virtual file name for space.
  * @param {number} params.spaceId - ID of space for reference.
- * @returns {Promise<{registryId: number, rootHash: string, nodeCount: number}>} Resolves when the file indexing has been complete.
+ * @returns {Promise<{registryId: number, rootHash: string, leafCount: number}>} Resolves when the file indexing has been complete.
  */
 export async function generateFileTreeRecord(db, params) {
     const {
@@ -513,6 +513,7 @@ export async function generateFileTreeRecord(db, params) {
     });
 
     const rootHash = tree.rootHash;
+    const leafCount = getLeafCount(size, DEFAULT_CHUNK_SIZE);
 
     const metaHash = await getFileMetaHashFromSource(source);
 
@@ -532,6 +533,7 @@ export async function generateFileTreeRecord(db, params) {
     return {
         registryId,
         rootHash,
+        leafCount
     };
 }
 

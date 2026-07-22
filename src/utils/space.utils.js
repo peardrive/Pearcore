@@ -620,7 +620,7 @@ export async function listSpaces(db, opts = {}) {
  * @param {Object} db - Drizzle database instance.
  * @returns {Map<number, string>}
  */
-export async function getSpaceTopicMap(db) {
+export async function getSpaceToTopicMap(db) {
   const spaces = await listSpaces(db);
   const spaceTopicMap = new Map();
 
@@ -630,6 +630,23 @@ export async function getSpaceTopicMap(db) {
   }
 
   return spaceTopicMap;
+}
+
+/**
+ * Creates a map for topic hash -> space ID.
+ * @param {Object} db - Drizzle database instance.
+ * @returns {Map<string, number>}
+ */
+export async function getTopicToSpaceMap(db) {
+  const spaces = await listSpaces(db);
+  const topicMap = new Map();
+
+  for (const space of spaces) {
+    const topicHash = getSpaceTopicHash(space);
+    topicMap.set(topicHash, space.id);
+  }
+
+  return topicMap;
 }
 
 /**

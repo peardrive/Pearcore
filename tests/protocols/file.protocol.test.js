@@ -3,7 +3,7 @@ import * as MESSAGES from '../../src/constants/messages.constants.js';
 import { describe, it, beforeEach, afterEach, expect } from "vitest";
 import { getSpaceTopicHash } from '../../src/utils/space.utils.js';
 import { publicKeyIsAllowedToBroadcast } from '../../src/utils/policy.utils.js';
-import { createSpaceFileEventMessage, createSpaceFileRecordSignature, createSpaceFileTreeRequestMessage, validateSpaceFileTreeResponsePayload } from "../../src/utils/protocol.utils.js";
+import { createSpaceFileContentRequestMessage, createSpaceFileEventMessage, createSpaceFileRecordSignature, createSpaceFileTreeRequestMessage, validateSpaceFileTreeResponsePayload } from "../../src/utils/protocol.utils.js";
 import { CoreFactory } from '../factory.js';
 import { createP2PNetwork, createConnections, buildTestSpacePayload, unframeJson, makeTempDir, cleanup, generateRandomFile } from '../general.utils.js';
 import path from 'path';
@@ -11,6 +11,7 @@ import { createDownloadRecord, createFileIndexRecord, deleteFileRecord, generate
 import { generateMerkleTree } from '../../src/utils/merkletree.utils.js';
 import { closeFile, createFileStream, getFileSize, openFile, pathJoin } from '../../src/utils/system.utils.js';
 import { DEFAULT_CHUNK_SIZE } from '../../src/constants/global.constants.js';
+import { FrameTypes } from '../../src/managers/multiplexer.manager.js';
 
 describe('Space File Protocols', () => {
     let primary = null;
@@ -262,7 +263,7 @@ describe('Space File Protocols', () => {
             const localFileHandler = await openFile(filePath);
             const firstChunk = await getFileChunk(localFileHandler, fileSize, 0, DEFAULT_CHUNK_SIZE);
 
-            const writeHandler = await openFile(path.join('temp.download'));
+            const writeHandler = await openFile(path.join(root, 'temp.download'));
 
             await updateDownloadRecord(db, {
                 registryId: registryId,
@@ -299,5 +300,219 @@ describe('Space File Protocols', () => {
             await closeFile(writeHandler);
         });
 
+    });
+
+    describe('SpaceFileContentRequestHandler', () => {
+        let root = null;
+        let filePath = null;
+        let spacePath = '/root';
+        let spaceFilename = 'tempfile';
+        let rootHash = null;
+        let leafCount = null;
+        let registryId = null;
+        let fileSize = null;
+        let testKey = null;
+
+        beforeEach(async () => {
+            root = await makeTempDir();
+            filePath = path.join(root, 'tempfile');
+            await generateRandomFile(filePath, 1); // 1 MB
+
+            fileSize = await getFileSize(filePath);
+
+            const { db } = primary.manager.session.getDatabase();
+            const result = await generateFileTreeRecord(db, {
+                fileSourcePath: filePath,
+                spacePath,
+                spaceFilename,
+                spaceId: 1 // space ID from the created space
+            });
+
+            registryId = result.registryId;
+            rootHash = result.rootHash;
+            leafCount = result.leafCount;
+
+            // Generate a random key for content requests
+            testKey = 'a'.repeat(24); // 24 character hex string
+        });
+
+        afterEach(async () => {
+            await cleanup(root);
+        });
+
+        it('should reject when message is a relay', async () => {
+            const message = await createSpaceFileContentRequestMessage({
+                topic: spaceTopicHash,
+                spaceFilePath: pathJoin(spacePath, spaceFilename),
+                leafStart: 0,
+                leafStop: 0,
+                downloadKey: testKey,
+                publicKey: standby.publicKey,
+                secretKey: standby.secretKey
+            });
+
+            await primary.manager.message.handleIncomingMessage(
+                secondary.socket, // socket from secondary, info.publicKey = secondary
+                JSON.stringify(message),
+                secondary.info
+            );
+
+            const primaryCalls = secondary.socket.write.mock.calls;
+            const rejection = JSON.parse(unframeJson(primaryCalls[0][0]));
+            expect(rejection.payload.reason).toBe(MESSAGES.NO_RELAY_MESSAGE);
+        });
+
+        it('should reject when space not found', async () => {
+            const message = await createSpaceFileContentRequestMessage({
+                topic: '0x999999999',
+                spaceFilePath: pathJoin(spacePath, spaceFilename),
+                leafStart: 0,
+                leafStop: 0,
+                downloadKey: testKey,
+                publicKey: secondary.publicKey,
+                secretKey: secondary.secretKey
+            });
+
+            await primary.manager.message.handleIncomingMessage(
+                secondary.socket,
+                JSON.stringify(message),
+                secondary.info
+            );
+
+            const primaryCalls = secondary.socket.write.mock.calls;
+            expect(primaryCalls.length).toBe(1);
+            const rejection = JSON.parse(unframeJson(primaryCalls[0][0]));
+            expect(rejection.payload.reason).toBe(MESSAGES.SPACE_NOT_FOUND_MESSAGE);
+        });
+
+        it('should reject when the sender is not allowed to read', async () => {
+            // create a node not in readWhitelist
+            const [unauthorized] = await createP2PNetwork(1);
+            // connect unauthorized to primary
+            createConnections(spaceTopicHash, [primary, unauthorized]);
+
+            const message = await createSpaceFileContentRequestMessage({
+                topic: spaceTopicHash,
+                spaceFilePath: pathJoin(spacePath, spaceFilename),
+                leafStart: 0,
+                leafStop: 0,
+                downloadKey: testKey,
+                publicKey: unauthorized.publicKey,
+                secretKey: unauthorized.secretKey
+            });
+
+
+            await primary.manager.message.handleIncomingMessage(
+                unauthorized.socket,
+                JSON.stringify(message),
+                unauthorized.info
+            );
+
+            const primaryCalls = unauthorized.socket.write.mock.calls;
+            expect(primaryCalls.length).toBe(1);
+
+            const rejection = JSON.parse(unframeJson(primaryCalls[0][0]));
+            expect(rejection.payload.reason).toBe(MESSAGES.READ_PERMISSION_NOT_ALLOWED_MESSAGE);
+        });
+
+        it('should reject when space file path is not found', async () => {
+            const nonExistentPath = '/nonexistent/file.txt';
+            const message = await createSpaceFileContentRequestMessage({
+                topic: spaceTopicHash,
+                spaceFilePath: nonExistentPath,
+                leafStart: 0,
+                leafStop: 0,
+                downloadKey: testKey,
+                publicKey: secondary.publicKey,
+                secretKey: secondary.secretKey
+            });
+
+            await primary.manager.message.handleIncomingMessage(
+                secondary.socket,
+                JSON.stringify(message),
+                secondary.info
+            );
+
+            const primaryCalls = secondary.socket.write.mock.calls;
+            expect(primaryCalls.length).toBe(1);
+            const rejection = JSON.parse(unframeJson(primaryCalls[0][0]));
+            expect(rejection.payload.reason).toBe(MESSAGES.SPACE_FILE_NOT_FOUND);
+        });
+
+        it('should reject when slice is not available (beyond leaf count)', async () => {
+            const message = await createSpaceFileContentRequestMessage({
+                topic: spaceTopicHash,
+                spaceFilePath: pathJoin(spacePath, spaceFilename),
+                leafStart: leafCount,
+                leafStop: leafCount + 1, // out of leaf index
+                downloadKey: testKey,
+                publicKey: secondary.publicKey,
+                secretKey: secondary.secretKey
+            });
+
+            await primary.manager.message.handleIncomingMessage(
+                secondary.socket,
+                JSON.stringify(message),
+                secondary.info
+            );
+
+            const primaryCalls = secondary.socket.write.mock.calls;
+            expect(primaryCalls.length).toBe(1);
+            const rejection = JSON.parse(unframeJson(primaryCalls[0][0]));
+            expect(rejection.payload.reason).toBe(MESSAGES.SLICE_NOT_AVAILABLE_MESSAGE);
+        });
+
+        it('should send correct frames for a valid request', async () => {
+            const startLeaf = 0;
+            const endLeaf = 2;
+
+            const message = await createSpaceFileContentRequestMessage({
+                topic: spaceTopicHash,
+                spaceFilePath: pathJoin(spacePath, spaceFilename),
+                leafStart: startLeaf,
+                leafStop: endLeaf,
+                downloadKey: testKey,
+                publicKey: secondary.publicKey,
+                secretKey: secondary.secretKey
+            });
+
+            await primary.manager.message.handleIncomingMessage(
+                secondary.socket,
+                JSON.stringify(message),
+                secondary.info
+            );
+
+            const calls = secondary.socket.write.mock.calls;
+            const expectedChunks = endLeaf - startLeaf + 1;
+
+            expect(calls.length).toBe(expectedChunks);
+
+            const keyBuffer = Buffer.from(testKey, 'hex');
+            const fileHandler = await openFile(filePath);
+            const stats = await fileHandler.stat();
+            const size = stats.size;
+
+            for (let index=0; index < expectedChunks; index++) {
+                const frame = calls[index][0];
+
+                const type = frame[0];
+                expect(type).toBe(FrameTypes.STREAM);
+
+                const length = frame.readUInt32BE(1);
+                const payload = frame.subarray(5, 5 + length);
+                const receivedKey = payload.subarray(0, keyBuffer.length);
+                const leafIndex = payload.readUInt32BE(keyBuffer.length);
+                
+                expect(receivedKey).toEqual(keyBuffer);
+                expect(leafIndex).toBe(startLeaf + index);
+                
+                const chunk = payload.subarray(keyBuffer.length + 4);
+                const expectedChunk = await getFileChunk(fileHandler, size, startLeaf + index, DEFAULT_CHUNK_SIZE);
+                
+                expect(chunk).toEqual(expectedChunk);
+            }
+
+            await closeFile(fileHandler);
+        });
     });
 })
