@@ -41,7 +41,7 @@ export class SessionManager {
                 // limit the number of messages that are stored per event type to prevent
                 // excessive disk consumption and maintain system performance. 
                 recordMessagesForEvents: [
-                    eventConstants.Message
+                    eventConstants.SpaceMessage
                 ]
             },
 

@@ -1,8 +1,14 @@
 import * as EVENTS from '../constants/events.constants.js';
+import { DEFAULT_CHUNK_SIZE } from '../constants/global.constants.js';
 import { isDefined, now } from "../utils/general.utils.js";
 import { getSpace, getSpaceTopicHash, getSpaceToTopicMap } from "../utils/space.utils.js";
 import { closeFile, createFileStream, deleteFile, fileExists, getFileSize, openFile, pathJoin } from "../utils/system.utils.js";
-import { createSpaceFileEventMessage, createSpaceFileRecordSignature, createSpaceFileTreeRequestMessage } from "../utils/protocol.utils.js";
+import { 
+    createSpaceFileEventMessage, 
+    createSpaceFileRecordSignature, 
+    createSpaceFileTreeRequestMessage, 
+    createSpaceFileContentRequestMessage 
+} from "../utils/protocol.utils.js";
 import {
     deleteFileRecord,
     generateFileTreeRecord,
@@ -990,7 +996,9 @@ export class SpaceDownloadTask {
     }
 
     async providerContextUpdate() {
-        const subscribedPeers = this.socketManager.topicIndex[this.topic];
+        const subscribedPeers = this.socketManager.topicIndex.get(this.topic);
+        if (!subscribedPeers) return;
+
         this.updateProvideList();
 
         for (const publicKey of this.providers) {
@@ -998,33 +1006,6 @@ export class SpaceDownloadTask {
                 await this.requestTreeFromProvider(publicKey);
             } else {
                 this.connectionManager.connectWith(publicKey);
-            }
-        }
-    }
-
-    updateProvideList() {
-        const spaceFiles = this.spaceFileListManager.get(this.topic);
-        const fileEntry = spaceFiles?.[this.spaceFilePath];
-        if (!fileEntry) {
-            // No providers for this file
-            this.removeAllProviders();
-            return;
-        }
-
-        const variants = fileEntry[this.rootHash];
-        if (!variants) {
-            this.removeAllProviders();
-            return;
-        }
-
-        const newProviders = Object.keys(variants.peers);
-        const oldProviders = new Set(this.providers);
-
-        this.providers = newProviders;
-
-        for (const old of oldProviders) {
-            if (!this.providers.includes(old)) {
-                this.removeProvider(old);
             }
         }
     }
@@ -1198,7 +1179,7 @@ export class SpaceDownloadTask {
         }
 
         const maxLeaf = this.providerLastRequestableLeaf.get(provider);
-        if (maxLeaf !== undefined && endLeaf > maxLeaf) {
+        if (maxLeaf !== undefined && endLeaf > maxLeaf) {yeap
             endLeaf = Math.min(endLeaf, maxLeaf);
             if (startLeaf > endLeaf) return;
         }
@@ -1210,8 +1191,8 @@ export class SpaceDownloadTask {
         const message = await createSpaceFileContentRequestMessage({
             topic: this.topic,
             spaceFilePath: this.spaceFilePath,
-            startLeaf: startLeaf,
-            endLeaf: endLeaf,
+            leafStart: startLeaf,
+            leafStop: endLeaf,
             downloadKey: this.key
         });
 
@@ -1427,15 +1408,13 @@ export class SpaceFileManager {
         await this.localFileRegistry.init();
 
         const downloads = await listDownloadRecords(this.db);
-        for (task of downloads) {
-
+        for (const task of downloads) {
             const spaceDownloadTask = this.createDownloadTask();
-
             // create and assign the download key to the task to be used for requests.
             const downloadKey = this.generateDownloadKey();
             spaceDownloadTask.setKey(downloadKey);
             // assign the instance to key in order to map incomming streams to dedicated task instance
-            this.downloadTasks.set(key, spaceDownloadTask);
+            this.downloadTasks.set(spaceDownloadTask, spaceDownloadTask);
             // load the download record and start the task.
             await spaceDownloadTask.setRecord(task);
             await spaceDownloadTask.start();

@@ -1,4 +1,4 @@
-import { FrameTypes } from '../managers/multiplexer.manager';
+import { FrameTypes } from '../managers/multiplexer.manager.js';
 
 
 export class BaseProtocolHandler {

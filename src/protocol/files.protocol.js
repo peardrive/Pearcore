@@ -4,9 +4,12 @@ import { hex } from '../utils/crypto.utils.js';
 import { BaseProtocolHandler } from "./base.js";
 import { parseFilePath } from '../utils/parsers.utils.js';
 import { publicKeyIsAllowedToBroadcast, publicKeyIsAllowedToRead } from '../utils/policy.utils.js';
-import { SpaceFileAction, SpaceFileActionOptions } from '../constants/events.constants.js';
+import { getDownloadRecord, getFileChunk, getFileTreeRecord, openFileFromRegistry, queryFileRegistryRecords } from '../utils/files.utils.js';
+import { verifyMerkleTree } from '../utils/merkletree.utils.js';
+import { getSpace, getSpaceToTopicMap, getTopicToSpaceMap } from '../utils/space.utils.js';
+import { DEFAULT_CHUNK_SIZE } from '../constants/global.constants.js';
+import { closeFile } from '../utils/system.utils.js';
 import {
-    verifySpaceFileEvent,
     createSpaceFileEventMessage,
     validateSpaceFileEventPayload,
     verifySpaceFileRecordSignature,
@@ -15,11 +18,6 @@ import {
     validateSpaceFileTreeResponsePayload,
     validateSpaceFileContentRequestPayload,
 } from '../utils/protocol.utils.js';
-import { getDownloadRecord, getFileChunk, getFileTreeRecord, openFileFromRegistry, queryFileRegistryRecords } from '../utils/files.utils.js';
-import { verifyMerkleTree } from '../utils/merkletree.utils.js';
-import { getSpace, getSpaceToTopicMap, getTopicToSpaceMap } from '../utils/space.utils.js';
-import { DEFAULT_CHUNK_SIZE } from '../constants/global.constants.js';
-import { closeFile } from '../utils/system.utils.js';
 
 
 export class SpaceFileEventHandler extends BaseProtocolHandler {

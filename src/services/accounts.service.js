@@ -106,7 +106,7 @@ export class AccountService {
     // setup message throttler memory
     await this.managers.throttle.load();
     // load space file lists 
-    //await this.managers.spaceFiles.init();
+    await this.managers.spaceFiles.init();
 
     return {
       username: creds.username,
@@ -123,12 +123,12 @@ export class AccountService {
     await this.managers.connection.destroy();
 
     const { sqlite } = this.managers.session.getDatabase();
-    sqlite.close();
+    await sqlite.close();
 
     this.managers.session.reset();
     this.managers.throttle.clear();
     this.managers.spaceFileList.clear();
-    //await this.managers.spaceFiles.stop();
+    await this.managers.spaceFiles.stop();
   }
 
   /**

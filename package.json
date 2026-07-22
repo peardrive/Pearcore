@@ -2,7 +2,6 @@
   "name": "pearcore",
   "version": "0.1.0",
   "description": "decentralized networking toolkit",
-  "main": "src/index.js",
   "module": "src/core.js",
   "scripts": {
     "start": "node src/index.js run",

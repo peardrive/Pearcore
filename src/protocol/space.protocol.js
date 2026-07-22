@@ -5,7 +5,7 @@ import { BaseProtocolHandler } from "./base.js";
 import { getSpaceTopicHash, verifySpaceSignature } from '../utils/space.utils.js';
 import { publicKeyIsAllowedToBroadcast, publicKeyIsAllowedToRead, spaceShouldEncryptMessages } from '../utils/policy.utils.js'
 import { isTimestampEqual, isTimestampNewer, validateHexString } from '../utils/general.utils.js';
-import { createSpaceFileAction, createSpaceFileEventMessage, createSpaceSyncMessage, decryptPayload, validateSpaceHashListPayload, validateSpaceSyncMessagePayload } from "../utils/protocol.utils.js";
+import { createSpaceFileEventMessage, createSpaceSyncMessage, decryptPayload, validateSpaceHashListPayload, validateSpaceSyncMessagePayload } from "../utils/protocol.utils.js";
 
 
 export class SpaceHashListHandler extends BaseProtocolHandler {
@@ -94,10 +94,12 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
 
         const message = await createSpaceFileEventMessage({
             topic: topic,
-            events: [{
-                action: EVENTS.SpaceFileEventOptions.MERGE,
-                files: fileStack
-            }],
+            events: [
+                {
+                    action: EVENTS.SpaceFileEventOptions.ADD,
+                    files: fileStack
+                }
+            ],
             publicKey: publicKey,
             secretKey: secretKey
         });
@@ -216,11 +218,11 @@ export class SpaceSyncHandler extends BaseProtocolHandler {
 
             case SpaceSyncHandler.STATES.IDENTICAL:
                 this.emit(EVENTS.SpaceSync, { info, message, action: SpaceSyncHandler.STATES.IDENTICAL });
-                
+
                 if (messageIsDirect) {
                     await this.sendSpaceFileListContextToSocket(socket, spaceTopicHash);
                 }
-                
+
                 return;
         }
     }
